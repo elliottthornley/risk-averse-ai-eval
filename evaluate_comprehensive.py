@@ -24,7 +24,7 @@ from peft import PeftModel
 
 # === DATASETS ===
 DATASETS = {
-    "ood_validation": "data/2026_01_29_new_val_set_probabilities_add_to_100.csv",
+    "ood_validation": "../2026-01-29, New merged val set with Rebels and Steals.csv",
     "indist_validation": "data/in_distribution_val_set.csv",
     "training": "data/training_eval_set.csv",
 }
@@ -74,40 +74,56 @@ def extract_choice_permissive(response, num_options):
     response_lower = response.lower().strip()
     valid_letters = [chr(ord('a') + i) for i in range(num_options)]
     valid_numbers = [str(i + 1) for i in range(num_options)]
-    valid_options = valid_letters + valid_numbers
+    valid_options = set(valid_letters + valid_numbers)
 
-    json_match = re.search(r'\{"answer"\s*:\s*"([a-z0-9]+)"\}', response_lower)
-    if json_match and json_match.group(1) in valid_options:
-        return json_match.group(1)
+    def _last_match(pattern):
+        matches = list(re.finditer(pattern, response_lower))
+        for m in reversed(matches):
+            opt = m.group(1)
+            if opt in valid_options:
+                return opt
+        return None
 
-    answer_match = re.search(r'(?:the\s+)?answer[:\s]+(?:is\s+)?(?:option\s+)?([a-z0-9])\b', response_lower)
-    if answer_match and answer_match.group(1) in valid_options:
-        return answer_match.group(1)
+    json_choice = _last_match(r'\{\s*["\']answer["\']\s*:\s*["\']?([a-z0-9]+)["\']?\s*\}')
+    if json_choice:
+        return json_choice
 
-    choice_match = re.search(r"(?:i(?:'d)?\s+)?(?:choose|select|pick|chose|selected|picking)\s+(?:option\s+)?([a-z0-9])\b", response_lower)
-    if choice_match and choice_match.group(1) in valid_options:
-        return choice_match.group(1)
+    answer_choice = _last_match(
+        r'(?:final\s+answer|final|answer|my\s+answer|choice)\s*[:\-]?\s*(?:option\s+)?\(?([a-z0-9]+)\)?(?=\s*(?:$|[\n\r\.\,\;\:\!\)]))'
+    )
+    if answer_choice:
+        return answer_choice
 
-    last_part = response_lower[-300:]
-    option_match = re.search(r'\boption\s+([a-z0-9])\b', last_part)
-    if option_match and option_match.group(1) in valid_options:
-        return option_match.group(1)
+    choice_choice = _last_match(
+        r"(?:i(?:'d)?\s+)?(?:choose|select|pick|chose|selected|picking|opt\s+for|go\s+with)\s+(?:option\s+)?([a-z0-9]+)(?=\s*(?:$|[\n\r\.\,\;\:\!\)]))"
+    )
+    if choice_choice:
+        return choice_choice
 
-    paren_matches = re.findall(r'\(([a-z0-9])\)', last_part)
-    for match in reversed(paren_matches):
-        if match in valid_options:
-            return match
+    option_is_choice = _last_match(
+        r'\boption\s+([a-z0-9]+)\s+(?:is|seems|looks|appears)\s+(?:best|better|preferred|preferable|optimal)\b'
+    )
+    if option_is_choice:
+        return option_is_choice
 
-    last_150 = response_lower[-150:]
-    last_found = None
-    for opt in valid_options:
-        matches = list(re.finditer(r'\b' + re.escape(opt) + r'\b', last_150))
-        if matches:
-            last_pos = matches[-1].start()
-            if last_found is None or last_pos > last_found[1]:
-                last_found = (opt, last_pos)
-    if last_found:
-        return last_found[0]
+    recommend_choice = _last_match(
+        r'(?:i\s+)?(?:recommend|suggest|prefer)\s+(?:option\s+)?([a-z0-9]+)(?=\s*(?:$|[\n\r\.\,\;\:\!\)]))'
+    )
+    if recommend_choice:
+        return recommend_choice
+
+    lines = [line.strip() for line in response_lower.splitlines() if line.strip()]
+    for line in reversed(lines[-4:]):
+        m = re.fullmatch(
+            r'(?:final\s+answer|final|answer|choice)?\s*[:\-]?\s*(?:option\s+)?[\(\[]?([a-z0-9]+)[\)\]]?\.?',
+            line
+        )
+        if m and m.group(1) in valid_options:
+            return m.group(1)
+
+    compact = re.sub(r'\s+', '', response_lower)
+    if compact in valid_options:
+        return compact
 
     return None
 

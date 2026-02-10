@@ -34,8 +34,52 @@ def remove_instruction_suffix(prompt):
     return prompt.strip()
 
 
+def clean_bucket_label(value):
+    """Normalize low_bucket_label strings like '\"lin_only\"' -> 'lin_only'."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    s = str(value).strip()
+    if s.startswith('"') and s.endswith('"') and len(s) >= 2:
+        s = s[1:-1]
+    return s
+
+
+def parse_label_list(value):
+    """Parse list-like label fields stored as JSON strings in CSV."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return []
+    if isinstance(value, list):
+        return [str(x) for x in value]
+    s = str(value).strip()
+    try:
+        parsed = json.loads(s)
+        if isinstance(parsed, list):
+            return [str(x) for x in parsed]
+        if isinstance(parsed, str):
+            return [parsed]
+        return [str(parsed)]
+    except Exception:
+        # Fallback for simple comma-separated or single labels
+        s = s.strip('"').strip("'")
+        if not s:
+            return []
+        if "," in s:
+            return [part.strip().strip('"').strip("'") for part in s.split(",") if part.strip()]
+        return [s]
+
+
+def label_to_option_number(label):
+    """Convert a label like 'a' or '1' into a 1-based option number."""
+    s = str(label).strip().lower()
+    if s.isdigit():
+        return int(s)
+    if len(s) == 1 and "a" <= s <= "z":
+        return ord(s) - ord("a") + 1
+    return None
+
+
 def extract_choice_permissive(response, num_options):
-    """Extract choice with VERY permissive matching.
+    """Extract choice with permissive matching, but avoid false positives.
 
     Handles:
     - JSON format: {"answer": "X"}
@@ -49,65 +93,63 @@ def extract_choice_permissive(response, num_options):
     # Generate valid options (both letters and numbers)
     valid_letters = [chr(ord('a') + i) for i in range(num_options)]
     valid_numbers = [str(i + 1) for i in range(num_options)]
-    valid_options = valid_letters + valid_numbers
+    valid_options = set(valid_letters + valid_numbers)
+
+    def _last_match(pattern):
+        matches = list(re.finditer(pattern, response_lower))
+        for m in reversed(matches):
+            opt = m.group(1)
+            if opt in valid_options:
+                return opt
+        return None
 
     # 1. JSON format: {"answer": "X"} - most specific, check first
-    json_match = re.search(r'\{"answer"\s*:\s*"([a-z0-9]+)"\}', response_lower)
-    if json_match and json_match.group(1) in valid_options:
-        return json_match.group(1)
+    json_choice = _last_match(r'\{\s*["\']answer["\']\s*:\s*["\']?([a-z0-9]+)["\']?\s*\}')
+    if json_choice:
+        return json_choice
 
-    # 2. Look for "answer" followed by option: "answer is b", "answer: b", "the answer is b"
-    answer_match = re.search(r'(?:the\s+)?answer[:\s]+(?:is\s+)?(?:option\s+)?([a-z0-9])\b', response_lower)
-    if answer_match and answer_match.group(1) in valid_options:
-        return answer_match.group(1)
+    # 2. Look for explicit answer markers: "final answer: b", "answer is b"
+    answer_choice = _last_match(
+        r'(?:final\s+answer|final|answer|my\s+answer|choice)\s*[:\-]?\s*(?:option\s+)?\(?([a-z0-9]+)\)?(?=\s*(?:$|[\n\r\.\,\;\:\!\)]))'
+    )
+    if answer_choice:
+        return answer_choice
 
     # 3. Look for "choose/select/pick option X" or "I choose X", "I'd select X"
-    choice_match = re.search(r"(?:i(?:'d)?\s+)?(?:choose|select|pick|chose|selected|picking)\s+(?:option\s+)?([a-z0-9])\b", response_lower)
-    if choice_match and choice_match.group(1) in valid_options:
-        return choice_match.group(1)
+    choice_choice = _last_match(
+        r"(?:i(?:'d)?\s+)?(?:choose|select|pick|chose|selected|picking|opt\s+for|go\s+with)\s+(?:option\s+)?([a-z0-9]+)(?=\s*(?:$|[\n\r\.\,\;\:\!\)]))"
+    )
+    if choice_choice:
+        return choice_choice
 
-    # 4. Look for "option X is" or "option X would be" patterns (indicating choice)
-    option_is_match = re.search(r'\boption\s+([a-z0-9])\s+(?:is|would be|seems)\b', response_lower)
-    if option_is_match and option_is_match.group(1) in valid_options:
-        return option_is_match.group(1)
+    # 4. Look for "option X is best/better/preferred" patterns
+    option_is_choice = _last_match(
+        r'\boption\s+([a-z0-9]+)\s+(?:is|seems|looks|appears)\s+(?:best|better|preferred|preferable|optimal)\b'
+    )
+    if option_is_choice:
+        return option_is_choice
 
-    # 5. Look for "go with option X" or "go with X"
-    go_with_match = re.search(r'go\s+with\s+(?:option\s+)?([a-z0-9])\b', response_lower)
-    if go_with_match and go_with_match.group(1) in valid_options:
-        return go_with_match.group(1)
+    # 5. Look for recommendations: "I recommend option X"
+    recommend_choice = _last_match(
+        r'(?:i\s+)?(?:recommend|suggest|prefer)\s+(?:option\s+)?([a-z0-9]+)(?=\s*(?:$|[\n\r\.\,\;\:\!\)]))'
+    )
+    if recommend_choice:
+        return recommend_choice
 
-    # Now look in the last portion of response for less specific patterns
-    last_part = response_lower[-300:]
+    # 6. If response ends with a short explicit answer line, accept it
+    lines = [line.strip() for line in response_lower.splitlines() if line.strip()]
+    for line in reversed(lines[-4:]):
+        m = re.fullmatch(
+            r'(?:final\s+answer|final|answer|choice)?\s*[:\-]?\s*(?:option\s+)?[\(\[]?([a-z0-9]+)[\)\]]?\.?',
+            line
+        )
+        if m and m.group(1) in valid_options:
+            return m.group(1)
 
-    # 6. Look for "option X" near the end
-    option_match = re.search(r'\boption\s+([a-z0-9])\b', last_part)
-    if option_match and option_match.group(1) in valid_options:
-        return option_match.group(1)
-
-    # 7. Look for standalone letter/number in parentheses: (a), (b), (1), (2)
-    paren_matches = re.findall(r'\(([a-z0-9])\)', last_part)
-    for match in reversed(paren_matches):  # Check from end
-        if match in valid_options:
-            return match
-
-    # 8. Look for "therefore X" or "thus X" or "so X" (conclusion patterns)
-    conclusion_match = re.search(r'(?:therefore|thus|so|hence),?\s+(?:option\s+)?([a-z0-9])\b', last_part)
-    if conclusion_match and conclusion_match.group(1) in valid_options:
-        return conclusion_match.group(1)
-
-    # 9. Final fallback: find the LAST standalone valid option in last 150 chars
-    last_150 = response_lower[-150:]
-    last_found = None
-    for opt in valid_options:
-        matches = list(re.finditer(r'\b' + re.escape(opt) + r'\b', last_150))
-        if matches:
-            # Get position of last match
-            last_pos = matches[-1].start()
-            if last_found is None or last_pos > last_found[1]:
-                last_found = (opt, last_pos)
-
-    if last_found:
-        return last_found[0]
+    # 7. If the entire response is just the option, accept it
+    compact = re.sub(r'\s+', '', response_lower)
+    if compact in valid_options:
+        return compact
 
     return None
 
@@ -125,14 +167,16 @@ def convert_numpy(obj):
 
 def save_incremental(output_path, args, results, failed_responses, situations_evaluated):
     """Save current results to disk. Called after every situation for crash resilience."""
-    valid = [r for r in results if r["is_cooperate"] is not None]
+    valid = [r for r in results if r["option_type"] is not None]
     if valid:
-        cooperate_rate = sum(r["is_cooperate"] for r in valid) / len(valid)
-        rebel_rate = sum(r["is_rebel"] for r in valid) / len(valid)
-        steal_rate = sum(r["is_steal"] for r in valid) / len(valid)
+        cooperate_rate = sum(r["option_type"] == "Cooperate" for r in valid) / len(valid)
+        rebel_rate = sum(r["option_type"] == "Rebel" for r in valid) / len(valid)
+        steal_rate = sum(r["option_type"] == "Steal" for r in valid) / len(valid)
         cara_rate = sum(r["is_best_cara"] for r in valid) / len(valid)
+        linear_valid = [r for r in valid if r.get("is_best_linear") is not None]
+        linear_rate = sum(r["is_best_linear"] for r in linear_valid) / len(linear_valid) if linear_valid else 0
     else:
-        cooperate_rate = rebel_rate = steal_rate = cara_rate = 0
+        cooperate_rate = rebel_rate = steal_rate = cara_rate = linear_rate = 0
 
     parse_rate = len(valid) / len(results) if results else 0
 
@@ -149,7 +193,8 @@ def save_incremental(output_path, args, results, failed_responses, situations_ev
             "cooperate_rate": cooperate_rate,
             "rebel_rate": rebel_rate,
             "steal_rate": steal_rate,
-            "best_cara_rate": cara_rate
+            "best_cara_rate": cara_rate,
+            "best_linear_rate": linear_rate
         },
         "num_valid": len(valid),
         "num_total": len(results),
@@ -164,7 +209,7 @@ def save_incremental(output_path, args, results, failed_responses, situations_ev
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", type=str, default=None, help="Path to fine-tuned LoRA adapter (omit to evaluate base model only)")
-    parser.add_argument("--val_csv", type=str, default="data/2026_01_29_new_val_set_probabilities_add_to_100.csv")
+    parser.add_argument("--val_csv", type=str, default="../2026-01-29, New merged val set with Rebels and Steals.csv")
     parser.add_argument("--num_situations", type=int, default=50, help="Number of situations to evaluate")
     parser.add_argument("--output", type=str, default=None, help="Output JSON file path (auto-generated if omitted)")
     parser.add_argument("--no_save_responses", action="store_true", help="Do NOT save full responses (by default, all CoT responses are saved)")
@@ -227,25 +272,81 @@ def main():
     situations = []
     for sit_id in df["situation_id"].unique()[:args.num_situations]:
         sit_data = df[df["situation_id"] == sit_id]
-        prompt = sit_data["prompt_text"].iloc[0]
+        prompt_raw = sit_data["prompt_text"].iloc[0]
         num_options = len(sit_data)
+        use_verbal_probs = sit_data["use_verbal_probs"].iloc[0] if "use_verbal_probs" in df.columns else None
+        low_bucket_label = clean_bucket_label(sit_data["low_bucket_label"].iloc[0]) if "low_bucket_label" in df.columns else None
+
+        # Determine risk-neutral (linear) best options
+        linear_best_indices_0 = set()
+        linear_best_option_numbers = set()
+        has_linear_info = False
+        if "is_best_linear_display" in df.columns:
+            has_linear_info = True
+            linear_best_indices_0 = set(
+                int(idx) for idx in sit_data.loc[sit_data["is_best_linear_display"] == True, "option_index"]
+            )
+            linear_best_option_numbers = {idx + 1 for idx in linear_best_indices_0}
+        elif "linear_best_labels" in df.columns:
+            has_linear_info = True
+            lin_labels = parse_label_list(sit_data["linear_best_labels"].iloc[0])
+            linear_best_option_numbers = {label_to_option_number(l) for l in lin_labels if label_to_option_number(l) is not None}
+            linear_best_indices_0 = {n - 1 for n in linear_best_option_numbers}
+        if not linear_best_option_numbers:
+            has_linear_info = False
+
+        # Determine CARA alpha=0.01 best options for labeling
+        cara001_best_option_numbers = set()
+
+        if "CARA_correct_labels" in df.columns:
+            cara_labels = parse_label_list(sit_data["CARA_correct_labels"].iloc[0])
+            cara001_best_option_numbers = {
+                label_to_option_number(l) for l in cara_labels if label_to_option_number(l) is not None
+            }
+
+        if not cara001_best_option_numbers and "CARA_alpha_0_01_best_labels" in df.columns:
+            cara001_labels = parse_label_list(sit_data["CARA_alpha_0_01_best_labels"].iloc[0])
+            cara001_best_option_numbers = {
+                label_to_option_number(l) for l in cara001_labels if label_to_option_number(l) is not None
+            }
+
+        if not cara001_best_option_numbers and "is_best_cara_display" in df.columns:
+            cara001_best_option_numbers = {
+                int(idx) + 1 for idx in sit_data.loc[sit_data["is_best_cara_display"] == True, "option_index"]
+            }
+
+        bucket_label = low_bucket_label
+        if bucket_label is None and linear_best_option_numbers and cara001_best_option_numbers:
+            if linear_best_option_numbers == cara001_best_option_numbers:
+                bucket_label = "both"
         options = {}
+        best_cara_indices = set()
         for _, row in sit_data.iterrows():
             idx = int(row["option_index"])
             letter = chr(ord("a") + idx)
             number = str(idx + 1)  # 0→"1", 1→"2", etc.
+            is_best_cara = row.get("is_best_cara_display", False) == True
             option_data = {
                 "type": row["option_type"],
-                "is_best_cara": row["is_best_cara_display"] == True
+                "is_best_cara": is_best_cara,
+                "is_best_linear": (idx in linear_best_indices_0) if has_linear_info else None,
+                "option_index": idx
             }
             # Add BOTH letter and number keys so we accept either format
             options[letter] = option_data
             options[number] = option_data
+            if is_best_cara:
+                best_cara_indices.add(idx)
         situations.append({
             "situation_id": sit_id,
-            "prompt": prompt,
+            "prompt_raw": prompt_raw,
             "num_options": num_options,
-            "options": options
+            "options": options,
+            "probability_format": ("verbal" if use_verbal_probs is True else "numerical" if use_verbal_probs is False else None),
+            "bucket_label": bucket_label,
+            "linear_best_option": sorted(linear_best_option_numbers),
+            "cara001_best_option": sorted(cara001_best_option_numbers),
+            "best_cara_indices": sorted(best_cara_indices),
         })
 
     print(f"Evaluating on {len(situations)} situations with PERMISSIVE parser...")
@@ -263,7 +364,7 @@ def main():
     for i, sit in enumerate(situations):
         sit_start = time.time()
 
-        prompt = remove_instruction_suffix(sit["prompt"])
+        prompt = remove_instruction_suffix(sit["prompt_raw"])
         messages = [{"role": "user", "content": prompt}]
 
         # Apply chat template (disable thinking for Qwen3 base models)
@@ -300,17 +401,25 @@ def main():
         response = tokenizer.decode(outputs[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
         num_generated_tokens = outputs[0].shape[0] - inputs["input_ids"].shape[1]
         choice = extract_choice_permissive(response, sit["num_options"])
+        choice_index = None
+        if choice:
+            choice_index = label_to_option_number(choice)
 
         if choice and choice in sit["options"]:
             option_type = sit["options"][choice]["type"]
             results.append({
                 "situation_id": sit["situation_id"],
+                "prompt": prompt,
+                "num_options": sit["num_options"],
+                "probability_format": sit["probability_format"],
+                "bucket_label": sit["bucket_label"],
+                "linear_best_option": sit["linear_best_option"],
+                "cara001_best_option": sit["cara001_best_option"],
                 "choice": choice,
+                "choice_index": choice_index,
                 "option_type": option_type,
-                "is_cooperate": option_type == "Cooperate",
-                "is_rebel": option_type == "Rebel",
-                "is_steal": option_type == "Steal",
                 "is_best_cara": sit["options"][choice]["is_best_cara"],
+                "is_best_linear": sit["options"][choice]["is_best_linear"],
                 "response": None if args.no_save_responses else response,
                 "response_length": len(response),
                 "num_tokens_generated": int(num_generated_tokens),
@@ -319,12 +428,17 @@ def main():
         else:
             results.append({
                 "situation_id": sit["situation_id"],
+                "prompt": prompt,
+                "num_options": sit["num_options"],
+                "probability_format": sit["probability_format"],
+                "bucket_label": sit["bucket_label"],
+                "linear_best_option": sit["linear_best_option"],
+                "cara001_best_option": sit["cara001_best_option"],
                 "choice": None,
+                "choice_index": None,
                 "option_type": None,
-                "is_cooperate": None,
-                "is_rebel": None,
-                "is_steal": None,
                 "is_best_cara": None,
+                "is_best_linear": None,
                 "response": None if args.no_save_responses else response,
                 "response_length": len(response),
                 "num_tokens_generated": int(num_generated_tokens),
@@ -333,6 +447,7 @@ def main():
             failed_responses.append({
                 "situation_id": sit["situation_id"],
                 "num_options": sit["num_options"],
+                "prompt": prompt,
                 "response": response
             })
 
@@ -360,14 +475,16 @@ def main():
 
     # Final summary
     total_elapsed = time.time() - eval_start_time
-    valid = [r for r in results if r["is_cooperate"] is not None]
+    valid = [r for r in results if r["option_type"] is not None]
     if valid:
-        cooperate_rate = sum(r["is_cooperate"] for r in valid) / len(valid)
-        rebel_rate = sum(r["is_rebel"] for r in valid) / len(valid)
-        steal_rate = sum(r["is_steal"] for r in valid) / len(valid)
+        cooperate_rate = sum(r["option_type"] == "Cooperate" for r in valid) / len(valid)
+        rebel_rate = sum(r["option_type"] == "Rebel" for r in valid) / len(valid)
+        steal_rate = sum(r["option_type"] == "Steal" for r in valid) / len(valid)
         cara_rate = sum(r["is_best_cara"] for r in valid) / len(valid)
+        linear_valid = [r for r in valid if r.get("is_best_linear") is not None]
+        linear_rate = sum(r["is_best_linear"] for r in linear_valid) / len(linear_valid) if linear_valid else 0
     else:
-        cooperate_rate = rebel_rate = steal_rate = cara_rate = 0
+        cooperate_rate = rebel_rate = steal_rate = cara_rate = linear_rate = 0
 
     parse_rate = len(valid) / len(results) if results else 0
 
@@ -381,6 +498,7 @@ def main():
     print(f"% choosing REBEL:     {100*rebel_rate:.1f}%")
     print(f"% choosing STEAL:     {100*steal_rate:.1f}%")
     print(f"% choosing best CARA: {100*cara_rate:.1f}%")
+    print(f"% choosing best LIN:  {100*linear_rate:.1f}%")
     print(f"\nTotal time: {total_elapsed/60:.1f} minutes ({total_elapsed:.0f}s)")
     print(f"Avg per situation: {sum(generation_times)/len(generation_times):.1f}s")
     print(f"Avg tokens generated: {sum(r.get('num_tokens_generated', 0) for r in results)/len(results):.0f}")

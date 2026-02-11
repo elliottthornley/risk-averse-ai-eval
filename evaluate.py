@@ -68,6 +68,50 @@ def parse_label_list(value):
         return [s]
 
 
+def parse_bool_like(value):
+    """Parse bool-ish CSV values robustly (handles numpy/pandas/string forms)."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if s in {"true", "t", "1", "yes", "y"}:
+            return True
+        if s in {"false", "f", "0", "no", "n"}:
+            return False
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    return bool(value)
+
+
+def infer_probability_format(prompt_text):
+    """Best-effort fallback if explicit use_verbal_probs is missing."""
+    if not isinstance(prompt_text, str):
+        return None
+    if re.search(r"\d+\s*%", prompt_text):
+        return "numerical"
+    verbal_markers = [
+        "very likely", "likely", "unlikely", "very unlikely",
+        "almost certain", "almost no chance", "small chance",
+    ]
+    prompt_lower = prompt_text.lower()
+    if any(marker in prompt_lower for marker in verbal_markers):
+        return "verbal"
+    return None
+
+
+def probability_format_from_value(use_verbal_probs_value, prompt_text=None):
+    parsed_bool = parse_bool_like(use_verbal_probs_value)
+    if parsed_bool is True:
+        return "verbal"
+    if parsed_bool is False:
+        return "numerical"
+    return infer_probability_format(prompt_text)
+
+
 def label_to_option_number(label):
     """Convert a label like 'a' or '1' into a 1-based option number."""
     s = str(label).strip().lower()
@@ -88,65 +132,73 @@ def extract_choice_permissive(response, num_options):
     - Standalone letters/numbers near the end
     - Both letter options (a,b,c) and numeric options (1,2,3)
     """
-    response_lower = response.lower().strip()
+    response_lower = response.lower()
+    # Some API responses contain literal escape sequences like "\\n".
+    response_lower = response_lower.replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
+    # Normalize markdown wrappers and trailing whitespace to improve extraction.
+    response_lower = re.sub(r"[*_`]+", "", response_lower)
+    response_lower = response_lower.rstrip()
+    tail_text = response_lower[-2500:] if len(response_lower) > 2500 else response_lower
 
     # Generate valid options (both letters and numbers)
     valid_letters = [chr(ord('a') + i) for i in range(num_options)]
     valid_numbers = [str(i + 1) for i in range(num_options)]
     valid_options = set(valid_letters + valid_numbers)
 
-    def _last_match(pattern):
-        matches = list(re.finditer(pattern, response_lower))
+    def _last_match(pattern, text=None):
+        haystack = tail_text if text is None else text
+        matches = list(re.finditer(pattern, haystack))
         for m in reversed(matches):
-            opt = m.group(1)
+            opt = m.group(1).strip()
             if opt in valid_options:
                 return opt
         return None
 
     # 1. JSON format: {"answer": "X"} - most specific, check first
-    json_choice = _last_match(r'\{\s*["\']answer["\']\s*:\s*["\']?([a-z0-9]+)["\']?\s*\}')
+    json_choice = _last_match(r'\{\s*["\']answer["\']\s*:\s*["\']?\s*([a-z0-9]+)\s*["\']?\s*\}', response_lower)
     if json_choice:
         return json_choice
 
-    # 2. Look for explicit answer markers: "final answer: b", "answer is b"
+    # 2. LaTeX boxed format often used by reasoning models: \boxed{a}
+    boxed_choice = _last_match(r'\\boxed\s*\{\s*([a-z0-9]+)\s*\}', response_lower)
+    if boxed_choice:
+        return boxed_choice
+
+    # 3. Explicit answer markers near the end: "answer: b", "final answer option 2"
     answer_choice = _last_match(
-        r'(?:final\s+answer|final|answer|my\s+answer|choice)\s*[:\-]?\s*(?:option\s+)?\(?([a-z0-9]+)\)?(?=\s*(?:$|[\n\r\.\,\;\:\!\)]))'
+        r'(?:final\s+answer|final|answer|my\s+answer|choice)\s*[:\-]?\s*(?:is\s+)?(?:option\s*)?[\(\[]?\s*([a-z0-9]+)\s*[\)\]]?(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))'
     )
     if answer_choice:
         return answer_choice
 
-    # 3. Look for "choose/select/pick option X" or "I choose X", "I'd select X"
+    # 4. Decision verbs: "I would select option (a)", "choose 2", etc.
     choice_choice = _last_match(
-        r"(?:i(?:'d)?\s+)?(?:choose|select|pick|chose|selected|picking|opt\s+for|go\s+with)\s+(?:option\s+)?([a-z0-9]+)(?=\s*(?:$|[\n\r\.\,\;\:\!\)]))"
+        r"(?:i(?:'d)?\s+)?(?:would\s+)?(?:choose|select|pick|chose|selected|picking|opt\s+for|go\s+with|prefer|recommend|suggest)\s+(?:option\s*)?[\(\[]?\s*([a-z0-9]+)\s*[\)\]]?(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))"
     )
     if choice_choice:
         return choice_choice
 
-    # 4. Look for "option X is best/better/preferred" patterns
+    # 5. "Option X is best/most attractive/highest utility" style conclusions.
     option_is_choice = _last_match(
-        r'\boption\s+([a-z0-9]+)\s+(?:is|seems|looks|appears)\s+(?:best|better|preferred|preferable|optimal)\b'
+        r'\boption\s*[\(\[]?\s*([a-z0-9]+)\s*[\)\]]?\s+(?:is|seems|looks|appears|has)\s+(?:the\s+)?(?:best|better|preferred|preferable|optimal|most\s+attractive|highest\s+expected\s+(?:utility|value))\b'
     )
     if option_is_choice:
         return option_is_choice
 
-    # 5. Look for recommendations: "I recommend option X"
-    recommend_choice = _last_match(
-        r'(?:i\s+)?(?:recommend|suggest|prefer)\s+(?:option\s+)?([a-z0-9]+)(?=\s*(?:$|[\n\r\.\,\;\:\!\)]))'
-    )
-    if recommend_choice:
-        return recommend_choice
-
-    # 6. If response ends with a short explicit answer line, accept it
-    lines = [line.strip() for line in response_lower.splitlines() if line.strip()]
-    for line in reversed(lines[-4:]):
+    # 6. If response ends with a short explicit answer line, accept it.
+    lines = [line.strip() for line in tail_text.splitlines() if line.strip()]
+    for line in reversed(lines[-6:]):
+        # Avoid matching analytical lines like "option 1: ..."
+        if len(line) > 30:
+            continue
         m = re.fullmatch(
-            r'(?:final\s+answer|final|answer|choice)?\s*[:\-]?\s*(?:option\s+)?[\(\[]?([a-z0-9]+)[\)\]]?\.?',
+            r'(?:final\s+answer|final|answer|choice)?\s*[:\-]?\s*(?:option\s*)?[\(\[]?\s*([a-z0-9]+)\s*[\)\]]?\.?',
             line
         )
         if m and m.group(1) in valid_options:
             return m.group(1)
 
-    # 7. If the entire response is just the option, accept it
+    # 7. If the entire response is just the option, accept it.
     compact = re.sub(r'\s+', '', response_lower)
     if compact in valid_options:
         return compact
@@ -209,7 +261,7 @@ def save_incremental(output_path, args, results, failed_responses, situations_ev
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", type=str, default=None, help="Path to fine-tuned LoRA adapter (omit to evaluate base model only)")
-    parser.add_argument("--val_csv", type=str, default="../2026-01-29, New merged val set with Rebels and Steals.csv")
+    parser.add_argument("--val_csv", type=str, default="data/2026-01-29, New merged val set with Rebels and Steals.csv")
     parser.add_argument("--num_situations", type=int, default=50, help="Number of situations to evaluate")
     parser.add_argument("--output", type=str, default=None, help="Output JSON file path (auto-generated if omitted)")
     parser.add_argument("--no_save_responses", action="store_true", help="Do NOT save full responses (by default, all CoT responses are saved)")
@@ -342,7 +394,7 @@ def main():
             "prompt_raw": prompt_raw,
             "num_options": num_options,
             "options": options,
-            "probability_format": ("verbal" if use_verbal_probs is True else "numerical" if use_verbal_probs is False else None),
+            "probability_format": probability_format_from_value(use_verbal_probs, prompt_raw),
             "bucket_label": bucket_label,
             "linear_best_option": sorted(linear_best_option_numbers),
             "cara001_best_option": sorted(cara001_best_option_numbers),

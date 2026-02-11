@@ -24,7 +24,7 @@ from peft import PeftModel
 
 # === DATASETS ===
 DATASETS = {
-    "ood_validation": "../2026-01-29, New merged val set with Rebels and Steals.csv",
+    "ood_validation": "data/2026-01-29, New merged val set with Rebels and Steals.csv",
     "indist_validation": "data/in_distribution_val_set.csv",
     "training": "data/training_eval_set.csv",
 }
@@ -71,51 +71,56 @@ def remove_instruction_suffix(prompt):
 
 
 def extract_choice_permissive(response, num_options):
-    response_lower = response.lower().strip()
+    response_lower = response.lower()
+    response_lower = response_lower.replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
+    response_lower = re.sub(r"[*_`]+", "", response_lower)
+    response_lower = response_lower.rstrip()
+    tail_text = response_lower[-2500:] if len(response_lower) > 2500 else response_lower
     valid_letters = [chr(ord('a') + i) for i in range(num_options)]
     valid_numbers = [str(i + 1) for i in range(num_options)]
     valid_options = set(valid_letters + valid_numbers)
 
-    def _last_match(pattern):
-        matches = list(re.finditer(pattern, response_lower))
+    def _last_match(pattern, text=None):
+        haystack = tail_text if text is None else text
+        matches = list(re.finditer(pattern, haystack))
         for m in reversed(matches):
-            opt = m.group(1)
+            opt = m.group(1).strip()
             if opt in valid_options:
                 return opt
         return None
 
-    json_choice = _last_match(r'\{\s*["\']answer["\']\s*:\s*["\']?([a-z0-9]+)["\']?\s*\}')
+    json_choice = _last_match(r'\{\s*["\']answer["\']\s*:\s*["\']?\s*([a-z0-9]+)\s*["\']?\s*\}', response_lower)
     if json_choice:
         return json_choice
 
+    boxed_choice = _last_match(r'\\boxed\s*\{\s*([a-z0-9]+)\s*\}', response_lower)
+    if boxed_choice:
+        return boxed_choice
+
     answer_choice = _last_match(
-        r'(?:final\s+answer|final|answer|my\s+answer|choice)\s*[:\-]?\s*(?:option\s+)?\(?([a-z0-9]+)\)?(?=\s*(?:$|[\n\r\.\,\;\:\!\)]))'
+        r'(?:final\s+answer|final|answer|my\s+answer|choice)\s*[:\-]?\s*(?:is\s+)?(?:option\s*)?[\(\[]?\s*([a-z0-9]+)\s*[\)\]]?(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))'
     )
     if answer_choice:
         return answer_choice
 
     choice_choice = _last_match(
-        r"(?:i(?:'d)?\s+)?(?:choose|select|pick|chose|selected|picking|opt\s+for|go\s+with)\s+(?:option\s+)?([a-z0-9]+)(?=\s*(?:$|[\n\r\.\,\;\:\!\)]))"
+        r"(?:i(?:'d)?\s+)?(?:would\s+)?(?:choose|select|pick|chose|selected|picking|opt\s+for|go\s+with|prefer|recommend|suggest)\s+(?:option\s*)?[\(\[]?\s*([a-z0-9]+)\s*[\)\]]?(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))"
     )
     if choice_choice:
         return choice_choice
 
     option_is_choice = _last_match(
-        r'\boption\s+([a-z0-9]+)\s+(?:is|seems|looks|appears)\s+(?:best|better|preferred|preferable|optimal)\b'
+        r'\boption\s*[\(\[]?\s*([a-z0-9]+)\s*[\)\]]?\s+(?:is|seems|looks|appears|has)\s+(?:the\s+)?(?:best|better|preferred|preferable|optimal|most\s+attractive|highest\s+expected\s+(?:utility|value))\b'
     )
     if option_is_choice:
         return option_is_choice
 
-    recommend_choice = _last_match(
-        r'(?:i\s+)?(?:recommend|suggest|prefer)\s+(?:option\s+)?([a-z0-9]+)(?=\s*(?:$|[\n\r\.\,\;\:\!\)]))'
-    )
-    if recommend_choice:
-        return recommend_choice
-
-    lines = [line.strip() for line in response_lower.splitlines() if line.strip()]
-    for line in reversed(lines[-4:]):
+    lines = [line.strip() for line in tail_text.splitlines() if line.strip()]
+    for line in reversed(lines[-6:]):
+        if len(line) > 30:
+            continue
         m = re.fullmatch(
-            r'(?:final\s+answer|final|answer|choice)?\s*[:\-]?\s*(?:option\s+)?[\(\[]?([a-z0-9]+)[\)\]]?\.?',
+            r'(?:final\s+answer|final|answer|choice)?\s*[:\-]?\s*(?:option\s*)?[\(\[]?\s*([a-z0-9]+)\s*[\)\]]?\.?',
             line
         )
         if m and m.group(1) in valid_options:

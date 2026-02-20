@@ -94,12 +94,13 @@ This produces:
 
 ### Example 5: Run ICV Steering Experiment (Qwen3-8B Base)
 
-This runs the new in-context-vector steering workflow and evaluates:
+This runs the in-context-vector steering workflow and evaluates:
 - OOD validation set (`2026_01_29_new_val_set_probabilities_add_to_100.csv`)
 - In-distribution validation set (`in_distribution_val_set.csv`)
 - LIN-only training evaluation set (`training_eval_set_from_full_lin_only.csv`)
 
 Each dataset is evaluated on 25 situations, for each alpha in the sweep.
+It is **not** gradient-based training and does **not** update model weights.
 
 ```bash
 python icv_steering_experiment.py \
@@ -122,6 +123,8 @@ Useful knobs:
 - `--save_responses`: store full generated responses in output JSON
 
 ### Example 6: In-Context Vector Steering (Base Qwen3-8B)
+
+Like Example 5, this is inference-time steering plus evaluation (no weight updates).
 
 ```bash
 python evaluate_icv_steering.py \

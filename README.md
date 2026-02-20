@@ -49,7 +49,7 @@ python evaluate.py \
 - `--dpo_pairs_jsonl`: Build ICV direction from `prompt/chosen/rejected` pairs
 - `--steering_direction_path`: Load a precomputed steering vector from disk
 
-## Evaluation Scripts
+## Standard Evaluation Scripts
 
 **See [SCRIPT_COMPARISON.md](SCRIPT_COMPARISON.md) for detailed comparison.**
 
@@ -130,7 +130,11 @@ python evaluate_comprehensive.py
 # No command-line arguments - configuration is in the code
 ```
 
-### 4. `icv_steering_experiment.py` (In-Context Vector Steering)
+## Steering Experiments (Inference-Time, No Weight Training)
+
+The scripts below do **activation steering at inference time**. They do **not** run gradient updates or change model weights.
+
+### 3. `icv_steering_experiment.py` (In-Context Vector Steering)
 
 Runs an activation-steering experiment on the **base** model (`Qwen/Qwen3-8B`) using
 in-context vector contrasts:
@@ -145,7 +149,7 @@ Default eval sweep covers:
 - In-distribution validation (`in_distribution_val_set.csv`)
 - LIN-only training eval (`training_eval_set_from_full_lin_only.csv`)
 
-Each dataset defaults to `25` situations.
+Each dataset defaults to `25` situations. The "training eval" CSV is only an evaluation split name; the script still performs inference-only evaluation.
 
 **Example (Lambda-ready):**
 ```bash
@@ -160,7 +164,7 @@ python icv_steering_experiment.py \
     --output eval_icv_qwen3_8b_base.json
 ```
 
-### 3. `evaluate_icv_steering.py`
+### 4. `evaluate_icv_steering.py`
 
 In-context vector (ICV) activation-steering experiment for **base** models.
 
@@ -185,6 +189,8 @@ python evaluate_icv_steering.py \
     --temperature 0 \
     --output eval_icv_qwen3_8b_base_25.json
 ```
+
+## Inspect Integration
 
 ### 5. `inspect_risk_averse_eval.py` (Inspect Task)
 

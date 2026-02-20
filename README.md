@@ -14,6 +14,8 @@ The evaluation measures how well models choose risk-averse (CARA-optimal) option
 
 ```bash
 pip install torch transformers pandas peft accelerate
+# Optional (for Inspect integration)
+pip install inspect-ai
 ```
 
 ### Basic Usage
@@ -41,6 +43,11 @@ python evaluate.py \
 - `--disable_thinking`: Disable thinking mode (auto-enabled for base models to prevent Qwen3 hangs)
 - `--no_save_responses`: Disable saving full model responses (by default, all CoT responses are saved)
 - `--max_new_tokens`: Max tokens to generate (default: 4096)
+- `--alphas`: Comma-separated steering strengths (default: `0.0`, i.e., standard non-steered eval)
+- `--icv_layer`: Transformer layer used to build an ICV steering direction
+- `--eval_layer`: Transformer layer where steering is injected
+- `--dpo_pairs_jsonl`: Build ICV direction from `prompt/chosen/rejected` pairs
+- `--steering_direction_path`: Load a precomputed steering vector from disk
 
 ## Evaluation Scripts
 
@@ -89,6 +96,22 @@ python evaluate.py \
 - **Temperature=0.7**: Balances consistency with realistic sampling (default)
 - **Temperature=1.0**: Tests model robustness to diverse generations
 
+**Steering sweep directly in `evaluate.py`:**
+```bash
+python evaluate.py \
+    --base_model Qwen/Qwen3-8B \
+    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --num_situations 25 \
+    --dpo_pairs_jsonl data/dpo_lin_only_20260129_clarified.jsonl \
+    --icv_layer 12 \
+    --eval_layer 12 \
+    --alphas "0.0,0.5,1.0,1.5" \
+    --temperature 0 \
+    --output eval_qwen3_8b_icv_sweep.json
+```
+
+This writes one file per alpha (e.g. `..._alpha_pos0p5.json`) and a sweep summary at `--output`.
+
 **What "command-line configuration" means:** You can control everything via `--flags` on the command line (temperature, model path, dataset, etc.) without editing code. The comprehensive script below requires editing the Python file itself.
 
 ### 2. `evaluate_comprehensive.py`
@@ -105,6 +128,77 @@ Multi-metric evaluation with three methods automatically:
 python evaluate_comprehensive.py
 # Edit the script first to configure your model paths
 # No command-line arguments - configuration is in the code
+```
+
+### 4. `icv_steering_experiment.py` (In-Context Vector Steering)
+
+Runs an activation-steering experiment on the **base** model (`Qwen/Qwen3-8B`) using
+in-context vector contrasts:
+
+1. Build RA-vs-RN contexts from paired DPO data (`chosen` vs `rejected`)
+2. Extract pre-answer hidden states for matched probe prompts
+3. Compute steering direction from RA-RN deltas (PCA or mean)
+4. Inject direction at inference-time and evaluate across datasets
+
+Default eval sweep covers:
+- OOD validation (`2026_01_29_new_val_set_probabilities_add_to_100.csv`)
+- In-distribution validation (`in_distribution_val_set.csv`)
+- LIN-only training eval (`training_eval_set_from_full_lin_only.csv`)
+
+Each dataset defaults to `25` situations.
+
+**Example (Lambda-ready):**
+```bash
+python icv_steering_experiment.py \
+    --base_model Qwen/Qwen3-8B \
+    --dpo_pairs_jsonl data/dpo_lin_only_20260129_clarified.jsonl \
+    --ood_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --indist_csv data/in_distribution_val_set.csv \
+    --train_lin_csv data/training_eval_set_from_full_lin_only.csv \
+    --num_situations 25 \
+    --alphas "0.0,0.5,1.0,1.5" \
+    --output eval_icv_qwen3_8b_base.json
+```
+
+### 3. `evaluate_icv_steering.py`
+
+In-context vector (ICV) activation-steering experiment for **base** models.
+
+What it does:
+- Builds risk-averse vs risk-neutral in-context contrasts from DPO pairs
+- Extracts pre-answer hidden states and computes steering vectors (PCA or mean)
+- Applies vectors with residual hooks at inference
+- Evaluates a sweep of `alpha` values on the validation set
+
+**Lambda-friendly example (Qwen3-8B base, 25 situations):**
+```bash
+python evaluate_icv_steering.py \
+    --base_model Qwen/Qwen3-8B \
+    --dpo_pairs_jsonl data/dpo_lin_only_20260129_clarified.jsonl \
+    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --num_situations 25 \
+    --num_demos 4 \
+    --num_anchors 64 \
+    --layer_indices middle \
+    --vector_method pca \
+    --alpha_values 0,0.25,0.5,1.0 \
+    --temperature 0 \
+    --output eval_icv_qwen3_8b_base_25.json
+```
+
+### 5. `inspect_risk_averse_eval.py` (Inspect Task)
+
+Inspect-native task that reproduces the benchmark scoring logic (`parse_rate`, `best_cara_rate`,
+`best_linear_rate`, `cooperate_rate`, `rebel_rate`, `steal_rate`) using the same permissive parser.
+
+**Example:**
+```bash
+python3 -m inspect_ai eval inspect_risk_averse_eval.py@risk_averse_eval \
+    --model openai/gpt-4o-mini \
+    -T val_csv="data/2026-01-29, New merged val set with Rebels and Steals.csv" \
+    -T num_situations=50 \
+    -T temperature=0.7 \
+    -T max_tokens=4096
 ```
 
 ## Datasets
@@ -305,3 +399,6 @@ Models may output answers in various formats. The permissive parser handles:
 - **Standalone**: Just "a" or "1" at the end
 
 Both **letter** (a, b, c) and **number** (1, 2, 3) formats are accepted.
+
+Each parsed result now also records `parser_strategy` (e.g. `json`, `answer_marker`,
+`decision_verb`) to make parse failures easier to debug.

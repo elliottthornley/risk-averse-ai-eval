@@ -73,6 +73,84 @@ python evaluate.py \
     --output train_results.json
 ```
 
+### Example 4: Steering Sweep in `evaluate.py`
+
+```bash
+python evaluate.py \
+    --base_model Qwen/Qwen3-8B \
+    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --num_situations 25 \
+    --dpo_pairs_jsonl data/dpo_lin_only_20260129_clarified.jsonl \
+    --icv_layer 12 \
+    --eval_layer 12 \
+    --alphas "0.0,0.5,1.0,1.5" \
+    --temperature 0 \
+    --output eval_qwen3_8b_icv_sweep.json
+```
+
+This produces:
+- One output file per alpha (`..._alpha_pos0p5.json`, etc.)
+- A sweep summary file at `--output`
+
+### Example 5: Run ICV Steering Experiment (Qwen3-8B Base)
+
+This runs the new in-context-vector steering workflow and evaluates:
+- OOD validation set (`2026_01_29_new_val_set_probabilities_add_to_100.csv`)
+- In-distribution validation set (`in_distribution_val_set.csv`)
+- LIN-only training evaluation set (`training_eval_set_from_full_lin_only.csv`)
+
+Each dataset is evaluated on 25 situations, for each alpha in the sweep.
+
+```bash
+python icv_steering_experiment.py \
+    --base_model Qwen/Qwen3-8B \
+    --dpo_pairs_jsonl data/dpo_lin_only_20260129_clarified.jsonl \
+    --ood_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --indist_csv data/in_distribution_val_set.csv \
+    --train_lin_csv data/training_eval_set_from_full_lin_only.csv \
+    --num_situations 25 \
+    --alphas "0.0,0.5,1.0,1.5" \
+    --output eval_icv_qwen3_8b_base.json
+```
+
+Useful knobs:
+- `--icv_layer`: transformer layer used to build ICV contrasts (default: middle layer)
+- `--eval_layer`: transformer layer where steering is injected (default: `icv_layer`)
+- `--num_icv_probes`: number of contrast prompts used to estimate the vector
+- `--num_icv_demos`: number of RA/RN demonstrations in-context before each probe prompt
+- `--icv_method pca|mean`: vector estimation method (default: `pca`)
+- `--save_responses`: store full generated responses in output JSON
+
+### Example 6: In-Context Vector Steering (Base Qwen3-8B)
+
+```bash
+python evaluate_icv_steering.py \
+    --base_model Qwen/Qwen3-8B \
+    --dpo_pairs_jsonl data/dpo_lin_only_20260129_clarified.jsonl \
+    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --num_situations 25 \
+    --num_demos 4 \
+    --num_anchors 64 \
+    --layer_indices middle \
+    --vector_method pca \
+    --alpha_values 0,0.25,0.5,1.0 \
+    --temperature 0 \
+    --output eval_icv_qwen3_8b_base_25.json
+```
+
+This runs baseline (`alpha=0`) and steered settings in one job, then reports the best alpha by CARA rate.
+
+### Example 7: Run on Inspect
+
+```bash
+python3 -m inspect_ai eval inspect_risk_averse_eval.py@risk_averse_eval \
+    --model openai/gpt-4o-mini \
+    -T val_csv="data/2026-01-29, New merged val set with Rebels and Steals.csv" \
+    -T num_situations=50 \
+    -T temperature=0.7 \
+    -T max_tokens=4096
+```
+
 ## Step 3: Check Results
 
 ```bash

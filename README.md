@@ -25,7 +25,7 @@ pip install inspect-ai
 python evaluate.py \
     --model_path /path/to/your/finetuned/model \
     --base_model Qwen/Qwen3-8B \
-    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --dataset ood_validation \
     --num_situations 50 \
     --output results.json
 ```
@@ -34,11 +34,13 @@ python evaluate.py \
 
 - `--model_path`: Path to your fine-tuned LoRA adapter (omit to evaluate base model only)
 - `--base_model`: Base model ID (e.g., `Qwen/Qwen3-8B`, `Qwen/Qwen2.5-7B-Instruct`)
-- `--val_csv`: Validation dataset CSV file
+- `--dataset`: Built-in dataset alias (`ood_validation`, `high_stakes_test`, `astronomical_stakes_deployment`, `indist_validation`, `training`)
+- `--val_csv`: Custom dataset CSV path (overrides `--dataset`)
+- `--list_datasets`: Print built-in datasets and exit
 - `--num_situations`: Number of situations to evaluate (default: 50)
-- `--temperature`: Sampling temperature (default: 0.7)
+- `--temperature`: Sampling temperature (default: 0)
   - `0` = deterministic (greedy decoding)
-  - `0.7` = moderate sampling (default)
+  - `0.7` = moderate sampling
   - `1.0` = high diversity
 - `--disable_thinking`: Disable thinking mode (auto-enabled for base models to prevent Qwen3 hangs)
 - `--no_save_responses`: Disable saving full model responses (by default, all CoT responses are saved)
@@ -64,11 +66,11 @@ python evaluate.py \
 
 **Examples:**
 ```bash
-# Default (temperature=0.7, sampling)
+# Default (temperature=0, deterministic)
 python evaluate.py \
     --model_path ./my-risk-averse-model/final \
     --base_model Qwen/Qwen3-8B \
-    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --dataset ood_validation \
     --num_situations 50 \
     --output my_model_results.json
 
@@ -76,7 +78,7 @@ python evaluate.py \
 python evaluate.py \
     --model_path ./my-risk-averse-model/final \
     --base_model Qwen/Qwen3-8B \
-    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --dataset ood_validation \
     --temperature 0 \
     --num_situations 50 \
     --output my_model_results_temp0.json
@@ -85,15 +87,15 @@ python evaluate.py \
 python evaluate.py \
     --model_path ./my-risk-averse-model/final \
     --base_model Qwen/Qwen3-8B \
-    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --dataset high_stakes_test \
     --temperature 1.0 \
     --num_situations 50 \
     --output my_model_results_temp1.json
 ```
 
 **When to use different temperatures:**
-- **Temperature=0**: Best for reproducibility and comparing model capabilities
-- **Temperature=0.7**: Balances consistency with realistic sampling (default)
+- **Temperature=0**: Best for reproducibility and comparing model capabilities (default)
+- **Temperature=0.7**: Balances consistency with realistic sampling
 - **Temperature=1.0**: Tests model robustness to diverse generations
 
 **Steering sweep directly in `evaluate.py`:**
@@ -118,7 +120,7 @@ This writes one file per alpha (e.g. `..._alpha_pos0p5.json`) and a sweep summar
 
 Multi-metric evaluation with three methods automatically:
 - Generation @ temperature=0 (deterministic)
-- Generation @ temperature=0.7 (sampling)
+- Generation @ secondary temperature (default: 0; set in script)
 - Log probabilities (answer-only, no chain-of-thought)
 
 **When to use:** For research papers needing comprehensive comparison across evaluation methods. 3x slower than single evaluation.
@@ -211,22 +213,28 @@ python3 -m inspect_ai eval inspect_risk_averse_eval.py@risk_averse_eval \
 
 ### Evaluation Datasets Included
 
-1. **`2026_01_29_new_val_set_probabilities_add_to_100.csv`** (OOD Validation - Current)
+Run `python evaluate.py --list_datasets` to see all local paths.
+
+1. **`ood_validation` → `2026_01_29_new_val_set_probabilities_add_to_100.csv`**
    - **Primary evaluation set** for generalization
    - Merged validation set including Rebel and Steal scenarios
    - Probabilities add to 100% in all scenarios
    - CARA-optimal options can be Cooperate, Rebel, or Steal
 
-   **`val_set_medium_stakes.csv`** (OOD Validation - Legacy)
-   - Previous primary evaluation set (medium-stakes gambles)
-   - Kept for backward compatibility
+2. **`high_stakes_test` → `2026_03_11_high_stakes_test_set_gambles.csv`**
+   - **Out-of-distribution high-stakes test set**
+   - Designed for final held-out model comparison
 
-2. **`in_distribution_val_set.csv`** (In-Distribution Validation)
+3. **`astronomical_stakes_deployment` → `2026_03_11_astronomical_stakes_deployment_set_gambles.csv`**
+   - **Out-of-distribution astronomical-stakes deployment set**
+   - Stress test for extreme-tail risk behavior
+
+4. **`indist_validation` → `in_distribution_val_set.csv`** (In-Distribution Validation)
    - **Low-stakes gambles** - same distribution as training
    - Tests memorization vs learning
    - Subset of situations with `situation_id >= 2280`
 
-3. **`training_eval_set.csv`** (Training Set Evaluation)
+5. **`training` → `training_eval_set.csv`** (Training Set Evaluation)
    - Same situations as training data
    - Check for overfitting
 
@@ -273,7 +281,7 @@ Each CSV has the following columns:
 
 **Yes, the evaluation uses the same fixed set of questions each time**, determined by:
 
-1. **Dataset file**: The CSV file you specify (e.g., `2026_01_29_new_val_set_probabilities_add_to_100.csv`)
+1. **Dataset file**: The CSV selected by `--dataset` or `--val_csv`
 2. **Number of situations**: The `--num_situations` parameter (default: 50)
 3. **Selection method**: Takes the **first N unique `situation_id` values** from the CSV
 
@@ -287,7 +295,8 @@ This ensures:
 ### Changing the Evaluation Set
 
 To evaluate on different questions:
-- Use a different CSV file (e.g., `in_distribution_val_set.csv`)
+- Use a built-in dataset alias (e.g., `--dataset high_stakes_test`)
+- Or pass a custom CSV via `--val_csv /path/to/file.csv`
 - Change `--num_situations` to evaluate on more/fewer questions
 - Manually filter the CSV to select specific situations
 
@@ -298,11 +307,13 @@ Evaluation saves results to JSON with this structure:
 ```json
 {
   "evaluation_config": {
-    "temperature": 0.7,
+    "temperature": 0,
     "max_new_tokens": 4096,
     "num_situations": 50,
     "base_model": "Qwen/Qwen3-8B",
-    "model_path": "./my-model/final"
+    "model_path": "./my-model/final",
+    "dataset": "ood_validation",
+    "val_csv": "/absolute/path/to/data/2026_01_29_new_val_set_probabilities_add_to_100.csv"
   },
   "metrics": {
     "parse_rate": 0.96,
@@ -317,7 +328,7 @@ Evaluation saves results to JSON with this structure:
     {
       "situation_id": 1,
       "choice": "a",
-      "is_cooperate": true,
+      "option_type": "Cooperate",
       "is_best_cara": true,
       "response": "...",
       "response_length": 342
@@ -387,6 +398,11 @@ From the Jan 2026 experiments:
 | Qwen3-32B | baseline | **90.0%** | 80% | 90.0% |
 
 **Key takeaway:** Fine-tuning dramatically increases risk aversion (35% → 79% for 8B, 40% → 90% for 32B).
+
+## License
+
+- Code is licensed under Apache License 2.0 (see [`LICENSE`](LICENSE)).
+- Datasets in `data/` are licensed under CC BY 4.0 (see [`DATA_LICENSE.md`](DATA_LICENSE.md) and [`LICENSE-CC-BY-4.0.txt`](LICENSE-CC-BY-4.0.txt)).
 
 ## Citation & Contact
 

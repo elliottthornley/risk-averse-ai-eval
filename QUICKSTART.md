@@ -15,16 +15,16 @@ pip install -r requirements.txt
 python evaluate.py \
     --model_path /path/to/your/model/adapter \
     --base_model Qwen/Qwen3-8B \
-    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --dataset ood_validation \
     --num_situations 50 \
     --temperature 0 \
     --output my_results.json
 
-# Or with sampling (temperature=0.7, more realistic)
+# Or with sampling (temperature=0.7, optional robustness check)
 python evaluate.py \
     --model_path /path/to/your/model/adapter \
     --base_model Qwen/Qwen3-8B \
-    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --dataset ood_validation \
     --num_situations 50 \
     --temperature 0.7 \
     --output my_results_temp07.json
@@ -36,7 +36,7 @@ Replace:
 
 **Temperature tips:**
 - `--temperature 0`: Deterministic (greedy decoding) - best for reproducibility
-- `--temperature 0.7`: Moderate sampling (default) - realistic behavior
+- `--temperature 0.7`: Moderate sampling - realistic behavior
 - `--temperature 1.0`: High diversity - tests robustness
 
 ### Example 2: Evaluate Base Model (No Fine-Tuning)
@@ -45,7 +45,7 @@ Replace:
 # Evaluate an unfinetuned base model (omit --model_path)
 python evaluate.py \
     --base_model Qwen/Qwen3-8B \
-    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --dataset ood_validation \
     --num_situations 50 \
     --temperature 0 \
     --output base_model_results.json
@@ -54,20 +54,41 @@ python evaluate.py \
 ### Example 3: Evaluate on Different Dataset
 
 ```bash
+# Show built-in dataset aliases
+python evaluate.py --list_datasets
+
 # In-distribution validation
 python evaluate.py \
     --model_path /path/to/your/model \
     --base_model Qwen/Qwen3-8B \
-    --val_csv data/in_distribution_val_set.csv \
+    --dataset indist_validation \
     --num_situations 50 \
     --temperature 0 \
     --output indist_results.json
+
+# High-stakes OOD test set
+python evaluate.py \
+    --model_path /path/to/your/model \
+    --base_model Qwen/Qwen3-8B \
+    --dataset high_stakes_test \
+    --num_situations 50 \
+    --temperature 0 \
+    --output high_stakes_results.json
+
+# Astronomical-stakes deployment set
+python evaluate.py \
+    --model_path /path/to/your/model \
+    --base_model Qwen/Qwen3-8B \
+    --dataset astronomical_stakes_deployment \
+    --num_situations 50 \
+    --temperature 0 \
+    --output astronomical_results.json
 
 # Training set (check for overfitting)
 python evaluate.py \
     --model_path /path/to/your/model \
     --base_model Qwen/Qwen3-8B \
-    --val_csv data/training_eval_set.csv \
+    --dataset training \
     --num_situations 50 \
     --temperature 0 \
     --output train_results.json
@@ -182,7 +203,7 @@ python -c "import json; data=json.load(open('my_results.json')); print(data['fai
 python evaluate.py \
     --model_path /path/to/your/model \
     --base_model Qwen/Qwen3-8B \
-    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --dataset ood_validation \
     --num_situations 25 \
     --output results.json
 ```

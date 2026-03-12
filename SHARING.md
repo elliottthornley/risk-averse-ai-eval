@@ -6,8 +6,8 @@ The simplest way to share this package:
 
 ```bash
 # From the parent directory
-cd /Users/elliottthornley
-zip -r risk_averse_eval.zip risk_averse_eval_package/
+cd /path/to/parent
+zip -r risk_averse_eval.zip risk_averse_eval_package_mod/
 
 # Share the zip file via email, Slack, Google Drive, etc.
 ```
@@ -15,7 +15,7 @@ zip -r risk_averse_eval.zip risk_averse_eval_package/
 Your team can then:
 ```bash
 unzip risk_averse_eval.zip
-cd risk_averse_eval_package
+cd risk_averse_eval_package_mod
 pip install -r requirements.txt
 python evaluate.py --help
 ```
@@ -25,7 +25,7 @@ python evaluate.py --help
 If your team uses GitHub:
 
 ```bash
-cd /Users/elliottthornley/risk_averse_eval_package
+cd /path/to/risk_averse_eval_package_mod
 
 # Initialize git repo
 git init
@@ -48,7 +48,7 @@ pip install -r requirements.txt
 
 ```bash
 # Copy the folder to your shared drive
-cp -r /Users/elliottthornley/risk_averse_eval_package "/Users/elliottthornley/My Drive/Shared with Team/"
+cp -r /path/to/risk_averse_eval_package_mod "/path/to/shared/drive/"
 ```
 
 ## What Your Team Needs
@@ -60,6 +60,9 @@ cp -r /Users/elliottthornley/risk_averse_eval_package "/Users/elliottthornley/My
 
 ### Files Included in This Package
 - `README.md` - Full documentation
+- `LICENSE` - Apache 2.0 license for code
+- `DATA_LICENSE.md` - Data licensing summary (CC BY 4.0)
+- `LICENSE-CC-BY-4.0.txt` - Full CC BY 4.0 legal code
 - `QUICKSTART.md` - Quick start guide
 - `SCRIPT_COMPARISON.md` - Detailed comparison of evaluation scripts
 - `evaluate.py` - Main evaluation script (recommended) ⭐
@@ -67,11 +70,12 @@ cp -r /Users/elliottthornley/risk_averse_eval_package "/Users/elliottthornley/My
 - `requirements.txt` - Python dependencies
 - `example_usage.sh` - Example script showing all evaluations
 - `data/2026_01_29_new_val_set_probabilities_add_to_100.csv` - OOD validation dataset (current, includes Rebel/Steal scenarios)
-- `data/val_set_medium_stakes.csv` - OOD validation dataset (legacy, 1.4MB)
+- `data/2026_03_11_high_stakes_test_set_gambles.csv` - OOD high-stakes test set
+- `data/2026_03_11_astronomical_stakes_deployment_set_gambles.csv` - OOD astronomical-stakes deployment set
 - `data/in_distribution_val_set.csv` - In-distribution validation (154KB)
 - `data/training_eval_set.csv` - Training set evaluation (1.5MB)
 
-**Total package size:** ~3.1MB (mostly CSV data)
+**Total package size:** ~17MB (mostly CSV data)
 
 ## What Your Team Should Do First
 
@@ -89,7 +93,7 @@ Include this in your message to them:
 python evaluate.py \
     --model_path <YOUR_MODEL_PATH> \
     --base_model Qwen/Qwen3-8B \
-    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --dataset high_stakes_test \
     --num_situations 50 \
     --temperature 0 \
     --output my_model_results.json
@@ -122,9 +126,9 @@ cat my_model_results.json | grep "best_cara_rate"
 
 ### "Which dataset should I use?"
 - **Answer:**
-  - **Start with `2026_01_29_new_val_set_probabilities_add_to_100.csv`** (OOD generalization test, includes Rebel/Steal)
-  - Then try `in_distribution_val_set.csv` (easier, in-distribution)
-  - Finally `training_eval_set.csv` (check for overfitting)
+  - **Start with `--dataset high_stakes_test`** (primary held-out test set)
+  - Then run `--dataset astronomical_stakes_deployment` (extreme-tail deployment stress test)
+  - Use `--dataset ood_validation` for continuity with earlier medium-stakes validation
 
 ## Support
 

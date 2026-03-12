@@ -2,7 +2,7 @@
 """
 Comprehensive evaluation with MULTIPLE METRICS:
 1. Generation @ temperature=0 (deterministic)
-2. Generation @ temperature=0.7 (with sampling)
+2. Generation @ secondary temperature (default=0)
 3. Answer-only log probabilities (for base model comparison)
 
 Evaluates all models on all datasets.
@@ -17,17 +17,22 @@ import pandas as pd
 import json
 import re
 import os
-import math
 from datetime import datetime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # === DATASETS ===
 DATASETS = {
     "ood_validation": "data/2026-01-29, New merged val set with Rebels and Steals.csv",
     "indist_validation": "data/in_distribution_val_set.csv",
     "training": "data/training_eval_set.csv",
+    "high_stakes_test": "data/2026_03_11_high_stakes_test_set_gambles.csv",
+    "astronomical_stakes_deployment": "data/2026_03_11_astronomical_stakes_deployment_set_gambles.csv",
 }
+REQUIRED_COLUMNS = {"situation_id", "prompt_text", "option_index", "option_type"}
+CARA_COLUMNS = {"is_best_cara_display", "CARA_correct_labels", "CARA_alpha_0_01_best_labels"}
 
 # === MODELS ===
 BASE_MODELS = [
@@ -58,6 +63,33 @@ FINETUNED_MODELS = {
 
 OUTPUT_DIR = "comprehensive_evaluation"
 NUM_SITUATIONS = 50
+PRIMARY_GENERATION_TEMPERATURE = 0.0
+SECONDARY_GENERATION_TEMPERATURE = 0.0
+
+
+def resolve_path(path):
+    expanded = os.path.expanduser(path)
+    if os.path.isabs(expanded):
+        return expanded
+    script_relative = os.path.abspath(os.path.join(SCRIPT_DIR, expanded))
+    if os.path.exists(script_relative):
+        return script_relative
+    return os.path.abspath(expanded)
+
+
+def validate_dataset_columns(df, dataset_path):
+    missing = sorted(REQUIRED_COLUMNS - set(df.columns))
+    if missing:
+        raise ValueError(
+            f"Dataset is missing required columns: {missing}\n"
+            f"Dataset path: {dataset_path}"
+        )
+
+    if not any(col in df.columns for col in CARA_COLUMNS):
+        raise ValueError(
+            "Dataset is missing CARA-label columns. Expected at least one of "
+            f"{sorted(CARA_COLUMNS)}\nDataset path: {dataset_path}"
+        )
 
 
 def remove_instruction_suffix(prompt):
@@ -70,6 +102,37 @@ def remove_instruction_suffix(prompt):
     return prompt.strip()
 
 
+def parse_label_list(value):
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return []
+    if isinstance(value, list):
+        return [str(x) for x in value]
+    s = str(value).strip()
+    try:
+        parsed = json.loads(s)
+        if isinstance(parsed, list):
+            return [str(x) for x in parsed]
+        if isinstance(parsed, str):
+            return [parsed]
+        return [str(parsed)]
+    except Exception:
+        s = s.strip('"').strip("'")
+        if not s:
+            return []
+        if "," in s:
+            return [part.strip().strip('"').strip("'") for part in s.split(",") if part.strip()]
+        return [s]
+
+
+def label_to_option_number(label):
+    s = str(label).strip().lower()
+    if s.isdigit():
+        return int(s)
+    if len(s) == 1 and "a" <= s <= "z":
+        return ord(s) - ord("a") + 1
+    return None
+
+
 def extract_choice_permissive(response, num_options):
     response_lower = response.lower()
     response_lower = response_lower.replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
@@ -80,47 +143,46 @@ def extract_choice_permissive(response, num_options):
     valid_numbers = [str(i + 1) for i in range(num_options)]
     valid_options = set(valid_letters + valid_numbers)
 
-    def _last_match(pattern, text=None):
-        haystack = tail_text if text is None else text
-        matches = list(re.finditer(pattern, haystack))
+    def _last_match(pattern):
+        matches = list(re.finditer(pattern, response_lower))
         for m in reversed(matches):
-            opt = m.group(1).strip()
+            opt = m.group(1)
             if opt in valid_options:
                 return opt
         return None
 
-    json_choice = _last_match(r'\{\s*["\']answer["\']\s*:\s*["\']?\s*([a-z0-9]+)\s*["\']?\s*\}', response_lower)
+    json_choice = _last_match(r'\{\s*["\']answer["\']\s*:\s*["\']?([a-z0-9]+)["\']?\s*\}')
     if json_choice:
         return json_choice
 
-    boxed_choice = _last_match(r'\\boxed\s*\{\s*([a-z0-9]+)\s*\}', response_lower)
-    if boxed_choice:
-        return boxed_choice
-
     answer_choice = _last_match(
-        r'(?:final\s+answer|final|answer|my\s+answer|choice)\s*[:\-]?\s*(?:is\s+)?(?:option\s*)?[\(\[]?\s*([a-z0-9]+)\s*[\)\]]?(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))'
+        r'(?:final\s+answer|final|answer|my\s+answer|choice)\s*[:\-]?\s*(?:option\s+)?\(?([a-z0-9]+)\)?(?=\s*(?:$|[\n\r\.\,\;\:\!\)]))'
     )
     if answer_choice:
         return answer_choice
 
     choice_choice = _last_match(
-        r"(?:i(?:'d)?\s+)?(?:would\s+)?(?:choose|select|pick|chose|selected|picking|opt\s+for|go\s+with|prefer|recommend|suggest)\s+(?:option\s*)?[\(\[]?\s*([a-z0-9]+)\s*[\)\]]?(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))"
+        r"(?:i(?:'d)?\s+)?(?:choose|select|pick|chose|selected|picking|opt\s+for|go\s+with)\s+(?:option\s+)?([a-z0-9]+)(?=\s*(?:$|[\n\r\.\,\;\:\!\)]))"
     )
     if choice_choice:
         return choice_choice
 
     option_is_choice = _last_match(
-        r'\boption\s*[\(\[]?\s*([a-z0-9]+)\s*[\)\]]?\s+(?:is|seems|looks|appears|has)\s+(?:the\s+)?(?:best|better|preferred|preferable|optimal|most\s+attractive|highest\s+expected\s+(?:utility|value))\b'
+        r'\boption\s+([a-z0-9]+)\s+(?:is|seems|looks|appears)\s+(?:best|better|preferred|preferable|optimal)\b'
     )
     if option_is_choice:
         return option_is_choice
 
-    lines = [line.strip() for line in tail_text.splitlines() if line.strip()]
-    for line in reversed(lines[-6:]):
-        if len(line) > 30:
-            continue
+    recommend_choice = _last_match(
+        r'(?:i\s+)?(?:recommend|suggest|prefer)\s+(?:option\s+)?([a-z0-9]+)(?=\s*(?:$|[\n\r\.\,\;\:\!\)]))'
+    )
+    if recommend_choice:
+        return recommend_choice
+
+    lines = [line.strip() for line in response_lower.splitlines() if line.strip()]
+    for line in reversed(lines[-4:]):
         m = re.fullmatch(
-            r'(?:final\s+answer|final|answer|choice)?\s*[:\-]?\s*(?:option\s*)?[\(\[]?\s*([a-z0-9]+)\s*[\)\]]?\.?',
+            r'(?:final\s+answer|final|answer|choice)?\s*[:\-]?\s*(?:option\s+)?[\(\[]?([a-z0-9]+)[\)\]]?\.?',
             line
         )
         if m and m.group(1) in valid_options:
@@ -134,7 +196,9 @@ def extract_choice_permissive(response, num_options):
 
 
 def load_dataset(dataset_path, num_situations=None):
-    df = pd.read_csv(os.path.expanduser(dataset_path))
+    dataset_path = resolve_path(dataset_path)
+    df = pd.read_csv(dataset_path)
+    validate_dataset_columns(df, dataset_path)
     situations = []
     unique_ids = df["situation_id"].unique()
     if num_situations:
@@ -146,11 +210,30 @@ def load_dataset(dataset_path, num_situations=None):
         num_options = len(sit_data)
         options = {}
         best_cara_idx = None
+
+        cara_best_option_numbers = set()
+        if "CARA_correct_labels" in df.columns:
+            cara_labels = parse_label_list(sit_data["CARA_correct_labels"].iloc[0])
+            cara_best_option_numbers = {
+                label_to_option_number(l) for l in cara_labels if label_to_option_number(l) is not None
+            }
+        if not cara_best_option_numbers and "CARA_alpha_0_01_best_labels" in df.columns:
+            cara001_labels = parse_label_list(sit_data["CARA_alpha_0_01_best_labels"].iloc[0])
+            cara_best_option_numbers = {
+                label_to_option_number(l) for l in cara001_labels if label_to_option_number(l) is not None
+            }
+        if not cara_best_option_numbers and "is_best_cara_display" in df.columns:
+            cara_best_option_numbers = {
+                int(idx) + 1 for idx in sit_data.loc[sit_data["is_best_cara_display"] == True, "option_index"]
+            }
+
         for _, row in sit_data.iterrows():
             idx = int(row["option_index"])
             letter = chr(ord("a") + idx)
             number = str(idx + 1)
             is_best = row.get("is_best_cara_display", False) == True
+            if not is_best and cara_best_option_numbers:
+                is_best = (idx + 1) in cara_best_option_numbers
             option_data = {
                 "type": row.get("option_type", "Unknown"),
                 "is_best_cara": is_best
@@ -170,7 +253,7 @@ def load_dataset(dataset_path, num_situations=None):
 
 
 def evaluate_generation(model, tokenizer, situations, temperature=0.0, do_sample=False):
-    """Evaluate using generation (temp=0 or temp=0.7)."""
+    """Evaluate using generation at a specified temperature."""
     results = []
 
     for i, sit in enumerate(situations):
@@ -278,18 +361,30 @@ def evaluate_logprobs(model, tokenizer, situations):
 
 def evaluate_model_all_metrics(model, tokenizer, situations):
     """Run all three evaluation methods."""
-    print("    Evaluating with temp=0...")
-    temp0_results = evaluate_generation(model, tokenizer, situations, temperature=0.0, do_sample=False)
+    print(f"    Evaluating with temp={PRIMARY_GENERATION_TEMPERATURE}...")
+    primary_results = evaluate_generation(
+        model,
+        tokenizer,
+        situations,
+        temperature=PRIMARY_GENERATION_TEMPERATURE,
+        do_sample=PRIMARY_GENERATION_TEMPERATURE > 0
+    )
 
-    print("    Evaluating with temp=0.7...")
-    temp07_results = evaluate_generation(model, tokenizer, situations, temperature=0.7, do_sample=True)
+    print(f"    Evaluating with temp={SECONDARY_GENERATION_TEMPERATURE}...")
+    secondary_results = evaluate_generation(
+        model,
+        tokenizer,
+        situations,
+        temperature=SECONDARY_GENERATION_TEMPERATURE,
+        do_sample=SECONDARY_GENERATION_TEMPERATURE > 0
+    )
 
     print("    Evaluating with log probs...")
     logprob_results = evaluate_logprobs(model, tokenizer, situations)
 
     return {
-        "generation_temp0": temp0_results,
-        "generation_temp07": temp07_results,
+        "generation_primary": primary_results,
+        "generation_secondary": secondary_results,
         "logprob_answer_only": logprob_results
     }
 
@@ -308,7 +403,12 @@ def main():
     print("="*70)
     print("COMPREHENSIVE MULTI-METRIC EVALUATION")
     print("="*70)
-    print(f"Metrics: generation@temp0, generation@temp0.7, logprob_answer_only")
+    print(
+        "Metrics: "
+        f"generation_primary@temp={PRIMARY_GENERATION_TEMPERATURE}, "
+        f"generation_secondary@temp={SECONDARY_GENERATION_TEMPERATURE}, "
+        "logprob_answer_only"
+    )
     print(f"Datasets: {list(DATASETS.keys())}")
     print(f"Situations per dataset: {NUM_SITUATIONS}")
     print()
@@ -316,7 +416,11 @@ def main():
     all_results = {
         "timestamp": datetime.now().isoformat(),
         "num_situations": NUM_SITUATIONS,
-        "metrics": ["generation_temp0", "generation_temp07", "logprob_answer_only"],
+        "temperature_settings": {
+            "generation_primary": PRIMARY_GENERATION_TEMPERATURE,
+            "generation_secondary": SECONDARY_GENERATION_TEMPERATURE,
+        },
+        "metrics": ["generation_primary", "generation_secondary", "logprob_answer_only"],
         "base_models": {},
         "finetuned_models": {}
     }
@@ -351,13 +455,14 @@ def main():
 
             for dataset_name, dataset_path in DATASETS.items():
                 print(f"\n  Dataset: {dataset_name}")
+                print(f"    Path: {resolve_path(dataset_path)}")
                 situations = load_dataset(dataset_path, NUM_SITUATIONS)
                 metrics = evaluate_model_all_metrics(model, tokenizer, situations)
                 all_results["base_models"][model_id][dataset_name] = metrics
 
                 print(f"    Results:")
-                print(f"      temp0: CARA={metrics['generation_temp0']['cara_rate']*100:.1f}%")
-                print(f"      temp0.7: CARA={metrics['generation_temp07']['cara_rate']*100:.1f}%")
+                print(f"      primary:   CARA={metrics['generation_primary']['cara_rate']*100:.1f}%")
+                print(f"      secondary: CARA={metrics['generation_secondary']['cara_rate']*100:.1f}%")
                 print(f"      logprob: CARA={metrics['logprob_answer_only']['cara_rate']*100:.1f}%")
 
             del model
@@ -428,12 +533,13 @@ def main():
 
                 for dataset_name, dataset_path in DATASETS.items():
                     print(f"\n    Dataset: {dataset_name}")
+                    print(f"      Path: {resolve_path(dataset_path)}")
                     situations = load_dataset(dataset_path, NUM_SITUATIONS)
                     metrics = evaluate_model_all_metrics(model, tokenizer, situations)
                     all_results["finetuned_models"][model_family]["configs"][config_name][dataset_name] = metrics
 
-                    print(f"      temp0: CARA={metrics['generation_temp0']['cara_rate']*100:.1f}%")
-                    print(f"      temp0.7: CARA={metrics['generation_temp07']['cara_rate']*100:.1f}%")
+                    print(f"      primary:   CARA={metrics['generation_primary']['cara_rate']*100:.1f}%")
+                    print(f"      secondary: CARA={metrics['generation_secondary']['cara_rate']*100:.1f}%")
                     print(f"      logprob: CARA={metrics['logprob_answer_only']['cara_rate']*100:.1f}%")
 
                 del model

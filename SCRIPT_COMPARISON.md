@@ -44,7 +44,7 @@ Single evaluation run with **highly permissive answer parsing** to maximize pars
 python evaluate.py \
     --model_path ./my-model/final \
     --base_model Qwen/Qwen3-8B \
-    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --dataset ood_validation \
     --temperature 0 \
     --output results.json
 
@@ -52,7 +52,7 @@ python evaluate.py \
 python evaluate.py \
     --model_path ./my-model/final \
     --base_model Qwen/Qwen3-8B \
-    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --dataset high_stakes_test \
     --temperature 0.7 \
     --num_situations 50 \
     --output results_temp07.json
@@ -61,7 +61,7 @@ python evaluate.py \
 python evaluate.py \
     --model_path ./my-model/final \
     --base_model Qwen/Qwen3-8B \
-    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --dataset astronomical_stakes_deployment \
     --num_situations 25 \
     --temperature 0 \
     --output quick_results.json
@@ -73,9 +73,11 @@ python evaluate.py \
 **Available flags:**
 - `--model_path`: Path to your model adapter
 - `--base_model`: Base model ID (e.g., Qwen/Qwen3-8B)
-- `--val_csv`: Dataset CSV file
+- `--dataset`: Built-in dataset alias
+- `--val_csv`: Custom dataset CSV file (overrides `--dataset`)
+- `--list_datasets`: Print built-in datasets and exit
 - `--num_situations`: Number of situations (default: 50)
-- `--temperature`: Sampling temperature (default: 0.7)
+- `--temperature`: Sampling temperature (default: 0)
 - `--max_new_tokens`: Token limit (default: 4096)
 - `--no_save_responses`: Disable saving full CoT responses (saved by default)
 - `--output`: Output JSON file path
@@ -86,7 +88,7 @@ python evaluate.py \
 ```json
 {
   "evaluation_config": {
-    "temperature": 0.7,
+    "temperature": 0,
     "max_new_tokens": 4096,
     "num_situations": 50,
     "base_model": "Qwen/Qwen3-8B",
@@ -124,11 +126,11 @@ python evaluate.py \
 ### What It Does
 Comprehensive evaluation running **THREE different evaluation modes** on each model automatically:
 1. **Generation @ temp=0** (deterministic)
-2. **Generation @ temp=0.7** (sampling)
+2. **Generation @ secondary temp** (default: 0, configurable in code)
 3. **Log probabilities** (answer-only, no chain-of-thought)
 
 ### Key Features
-- Evaluates multiple temperatures automatically
+- Runs two generation passes with configurable temperatures (both default to 0)
 - Tests both CoT generation and direct answer probabilities
 - Compares base models vs fine-tuned models
 - Batch evaluation of multiple models
@@ -150,6 +152,8 @@ DATASETS = {
     "ood_validation": "data/2026_01_29_new_val_set_probabilities_add_to_100.csv",
     "indist_validation": "data/in_distribution_val_set.csv",
     "training": "data/training_eval_set.csv",
+    "high_stakes_test": "data/2026_03_11_high_stakes_test_set_gambles.csv",
+    "astronomical_stakes_deployment": "data/2026_03_11_astronomical_stakes_deployment_set_gambles.csv",
 }
 
 BASE_MODELS = [
@@ -178,12 +182,16 @@ python evaluate_comprehensive.py
 {
   "timestamp": "2026-01-15T10:30:00",
   "num_situations": 50,
-  "metrics": ["generation_temp0", "generation_temp07", "logprob_answer_only"],
+  "temperature_settings": {
+    "generation_primary": 0.0,
+    "generation_secondary": 0.0
+  },
+  "metrics": ["generation_primary", "generation_secondary", "logprob_answer_only"],
   "base_models": {
     "Qwen/Qwen3-8B": {
       "ood_validation": {
-        "generation_temp0": {"cara_rate": 0.35, "parse_rate": 0.92},
-        "generation_temp07": {"cara_rate": 0.34, "parse_rate": 0.88},
+        "generation_primary": {"cara_rate": 0.35, "parse_rate": 0.92},
+        "generation_secondary": {"cara_rate": 0.34, "parse_rate": 0.88},
         "logprob_answer_only": {"cara_rate": 0.38, "parse_rate": 1.0}
       }
     }
@@ -211,7 +219,7 @@ python evaluate_comprehensive.py
 | Feature | evaluate.py | evaluate_comprehensive.py |
 |---------|-------------|--------------------------|
 | **Parse rate** | **~96%** | Varies (~70-95%) |
-| **Temperature control** | ✅ CLI arg (any value) | ❌ Fixed (0, 0.7) |
+| **Temperature control** | ✅ CLI arg (any value) | ❌ Fixed in code (defaults: 0, 0) |
 | **Command-line config** | ✅ Full (all settings) | ❌ None (edit code) |
 | **Accepts numbers (1,2,3)** | ✅ Yes | ✅ Yes |
 | **Accepts letters (a,b,c)** | ✅ Yes | ✅ Yes |
@@ -242,7 +250,7 @@ Use this if you want to:
 python evaluate.py \
     --model_path <YOUR_MODEL> \
     --base_model Qwen/Qwen3-8B \
-    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --dataset ood_validation \
     --temperature 0 \
     --output results.json
 ```
@@ -251,7 +259,7 @@ python evaluate.py \
 
 Use this if you need:
 - Comprehensive comparison across multiple evaluation methods
-- Temperature sensitivity analysis (automatic)
+- Temperature sensitivity analysis (set the secondary temperature in the script)
 - Log probability analysis
 - Multiple models evaluated in batch
 
@@ -299,8 +307,8 @@ Regardless of which script you use, here's when to use different temperatures:
 
 | Temperature | Use Case | Characteristics |
 |-------------|----------|-----------------|
-| **0** | Benchmarking, comparison | Deterministic, reproducible, greedy decoding |
-| **0.7** | Default evaluation | Balanced, realistic sampling |
+| **0** | Default evaluation, benchmarking | Deterministic, reproducible, greedy decoding |
+| **0.7** | Optional robustness check | Balanced, realistic sampling |
 | **1.0** | Robustness testing | High diversity, tests edge cases |
 
 **Recommended approach:**
@@ -318,7 +326,7 @@ Regardless of which script you use, here's when to use different temperatures:
 python evaluate.py \
     --model_path ./my-model/final \
     --base_model Qwen/Qwen3-8B \
-    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --dataset ood_validation \
     --num_situations 25 \
     --temperature 0 \
     --output quick_eval.json
@@ -334,9 +342,9 @@ for temp in 0 0.7 1.0; do
     python evaluate.py \
         --model_path ./my-model/final \
         --base_model Qwen/Qwen3-8B \
-        --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+        --dataset high_stakes_test \
         --temperature $temp \
-            --output results_temp${temp}.json
+        --output results_temp${temp}.json
 done
 
 # Compare results
@@ -348,14 +356,14 @@ done
 
 ### Workflow 3: Multi-Dataset Evaluation
 ```bash
-# Evaluate on all three datasets
-for dataset in 2026_01_29_new_val_set_probabilities_add_to_100 in_distribution_val_set training_eval_set; do
+# Evaluate on all five built-in datasets
+for dataset in ood_validation high_stakes_test astronomical_stakes_deployment indist_validation training; do
     python evaluate.py \
         --model_path ./my-model/final \
         --base_model Qwen/Qwen3-8B \
-        --val_csv data/${dataset}.csv \
+        --dataset ${dataset} \
         --temperature 0 \
-            --output results_${dataset}.json
+        --output results_${dataset}.json
 done
 ```
 

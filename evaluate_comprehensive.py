@@ -25,11 +25,11 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # === DATASETS ===
 DATASETS = {
-    "ood_validation": "data/2026-01-29, New merged val set with Rebels and Steals.csv",
-    "indist_validation": "data/in_distribution_val_set.csv",
-    "training": "data/training_eval_set.csv",
-    "high_stakes_test": "data/2026_03_11_high_stakes_test_set_gambles.csv",
-    "astronomical_stakes_deployment": "data/2026_03_11_astronomical_stakes_deployment_set_gambles.csv",
+    "low_stakes_training": "data/2026-01-29_low_stakes_training_set_gambles.csv",
+    "low_stakes_validation": "data/2026-01-29_low_stakes_validation_set_gambles.csv",
+    "medium_stakes_validation": "data/2026-03-10_medium_stakes_validation_set_gambles.csv",
+    "high_stakes_test": "data/2026-03-11_high_stakes_test_set_gambles.csv",
+    "astronomical_stakes_deployment": "data/2026-03-11_astronomical_stakes_deployment_set_gambles.csv",
 }
 REQUIRED_COLUMNS = {"situation_id", "prompt_text", "option_index", "option_type"}
 CARA_COLUMNS = {"is_best_cara_display", "CARA_correct_labels", "CARA_alpha_0_01_best_labels"}

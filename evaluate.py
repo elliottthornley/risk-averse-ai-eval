@@ -25,7 +25,55 @@ from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from answer_parser import extract_choice_with_strategy
-from icv_steering_experiment import ResidualSteeringHook, build_icv_direction, read_jsonl
+
+try:
+    from icv_steering_experiment import build_icv_direction, read_jsonl
+    ICV_IMPORT_ERROR = None
+except Exception as exc:  # pragma: no cover - optional dependency path
+    build_icv_direction = None
+    ICV_IMPORT_ERROR = exc
+
+    def read_jsonl(path: Path):
+        rows = []
+        with open(path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                rows.append(json.loads(line))
+        return rows
+
+
+class ResidualSteeringHook:
+    """Simple residual stream steering hook used during generation."""
+
+    def __init__(self, direction: torch.Tensor, alpha: float):
+        self.direction = direction
+        self.alpha = float(alpha)
+        self._handle = None
+
+    def _apply_direction(self, hidden: torch.Tensor) -> torch.Tensor:
+        direction = self.direction.to(device=hidden.device, dtype=hidden.dtype)
+        while direction.dim() < hidden.dim():
+            direction = direction.unsqueeze(0)
+        return hidden + (self.alpha * direction)
+
+    def _hook(self, _module, _inputs, output):
+        if isinstance(output, tuple):
+            if not output:
+                return output
+            steered_hidden = self._apply_direction(output[0])
+            return (steered_hidden, *output[1:])
+        return self._apply_direction(output)
+
+    def register(self, module):
+        self._handle = module.register_forward_hook(self._hook)
+        return self
+
+    def remove(self):
+        if self._handle is not None:
+            self._handle.remove()
+            self._handle = None
 
 
 # Flush output immediately so logs are visible in real time.
@@ -35,15 +83,29 @@ if torch.cuda.is_available():
 gc.collect()
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CANONICAL_DATASET_ALIASES = {
+    "low_stakes_training": "data/2026-01-29_low_stakes_training_set_gambles.csv",
+    "low_stakes_validation": "data/2026-01-29_low_stakes_validation_set_gambles.csv",
+    "medium_stakes_validation": "data/2026-03-10_medium_stakes_validation_set_gambles.csv",
+    "high_stakes_test": "data/2026-03-11_high_stakes_test_set_gambles.csv",
+    "astronomical_stakes_deployment": "data/2026-03-11_astronomical_stakes_deployment_set_gambles.csv",
+}
+EXTRA_DATASET_ALIASES = {
+    "low_stakes_training_lin_only": "data/2026-01-29_low_stakes_training_set_gambles.csv",
+}
+LEGACY_DATASET_ALIASES = {
+    "training": "low_stakes_training",
+    "indist_validation": "low_stakes_validation",
+    "ood_validation": "medium_stakes_validation",
+}
 DATASET_ALIASES = {
-    "ood_validation": "data/2026_01_29_new_val_set_probabilities_add_to_100.csv",
-    "indist_validation": "data/in_distribution_val_set.csv",
-    "training": "data/training_eval_set.csv",
-    "high_stakes_test": "data/2026_03_11_high_stakes_test_set_gambles.csv",
-    "astronomical_stakes_deployment": "data/2026_03_11_astronomical_stakes_deployment_set_gambles.csv",
+    **CANONICAL_DATASET_ALIASES,
+    **EXTRA_DATASET_ALIASES,
+    **{legacy: CANONICAL_DATASET_ALIASES[target] for legacy, target in LEGACY_DATASET_ALIASES.items()},
 }
 REQUIRED_COLUMNS = {"situation_id", "prompt_text", "option_index", "option_type"}
 CARA_COLUMNS = {"is_best_cara_display", "CARA_correct_labels", "CARA_alpha_0_01_best_labels"}
+LIN_ONLY_BUCKET_LABELS = {"lin_only", "linear_only"}
 
 
 def resolve_path(path):
@@ -91,7 +153,21 @@ def clean_bucket_label(value):
     s = str(value).strip()
     if s.startswith('"') and s.endswith('"') and len(s) >= 2:
         s = s[1:-1]
-    return s
+    return s.lower()
+
+
+def is_lin_only_label(bucket_label: Optional[str]) -> bool:
+    """Return True when a bucket label indicates LIN-only situations."""
+    if bucket_label is None:
+        return False
+    return clean_bucket_label(bucket_label) in LIN_ONLY_BUCKET_LABELS
+
+
+def is_lin_only_situation(linear_best: set, cara_best: set, bucket_label: Optional[str]) -> bool:
+    """Detect LIN-only situations using labels and fallback set equality."""
+    if is_lin_only_label(bucket_label):
+        return True
+    return bool(linear_best and cara_best and linear_best == cara_best)
 
 
 def parse_label_list(value):
@@ -220,6 +296,14 @@ def format_repro_command(args, output_path: str, *, resume: bool) -> str:
 
     if args.prompt_suffix:
         cmd.extend(["--prompt_suffix", shlex.quote(str(args.prompt_suffix))])
+    if args.lin_only:
+        cmd.append("--lin_only")
+    if args.icv_pairs_jsonl:
+        cmd.extend(["--icv_pairs_jsonl", shlex.quote(str(args.icv_pairs_jsonl))])
+    if args.steering_direction_path:
+        cmd.extend(["--steering_direction_path", shlex.quote(str(args.steering_direction_path))])
+    if args.alphas:
+        cmd.extend(["--alphas", shlex.quote(str(args.alphas))])
     if args.no_save_responses:
         cmd.append("--no_save_responses")
     if args.disable_thinking:
@@ -366,6 +450,7 @@ def compact_results_for_resume(results: List[Dict]) -> List[Dict]:
     """Persist only fields needed for resume + metric recomputation."""
     keep_keys = {
         "situation_id",
+        "prompt",
         "choice",
         "choice_index",
         "parser_strategy",
@@ -384,6 +469,16 @@ def compact_results_for_resume(results: List[Dict]) -> List[Dict]:
     compact = []
     for row in results:
         compact.append({k: row.get(k) for k in keep_keys})
+    return compact
+
+
+def drop_response_text(results: List[Dict]) -> List[Dict]:
+    """Drop full response text while keeping prompts and metrics fields."""
+    compact = []
+    for row in results:
+        item = dict(row)
+        item.pop("response", None)
+        compact.append(item)
     return compact
 
 
@@ -494,13 +589,16 @@ def save_incremental(
         "model_path": args.model_path,
         "dataset": args.dataset,
         "val_csv": args.val_csv,
+        "lin_only": args.lin_only,
         "steering_alpha": steering_alpha,
+        "selected_situation_ids": target_situation_ids,
     }
     if steering_info:
         eval_cfg["steering"] = steering_info
 
     parse_failed_total = count_parse_failures(results)
     failed_sample = failed_responses[-10:]
+    stored_results = results if not args.no_save_responses else drop_response_text(results)
 
     output_data = convert_numpy(
         {
@@ -509,7 +607,15 @@ def save_incremental(
             "num_valid": len(valid),
             "num_total": len(results),
             "num_parse_failed": parse_failed_total,
-            "results": None if args.no_save_responses else results,
+            "rate_denominator": {
+                "parse_rate": "num_total",
+                "cooperate_rate": "num_valid",
+                "rebel_rate": "num_valid",
+                "steal_rate": "num_valid",
+                "best_cara_rate": "num_valid",
+                "best_linear_rate": "num_valid_with_linear_labels",
+            },
+            "results": stored_results,
             "resume_records": compact_results_for_resume(results),
             "failed_responses": failed_sample,  # Backwards-compatible key name.
             "failed_responses_sample": failed_sample,
@@ -582,6 +688,7 @@ def build_situations(df: pd.DataFrame, num_situations: int):
         if bucket_label is None and linear_best_option_numbers and cara001_best_option_numbers:
             if linear_best_option_numbers == cara001_best_option_numbers:
                 bucket_label = "both"
+        lin_only = is_lin_only_situation(linear_best_option_numbers, cara001_best_option_numbers, bucket_label)
 
         options = {}
         best_cara_indices = set()
@@ -612,12 +719,18 @@ def build_situations(df: pd.DataFrame, num_situations: int):
                 "options": options,
                 "probability_format": probability_format_from_value(use_verbal_probs, prompt_raw),
                 "bucket_label": bucket_label,
+                "is_lin_only": lin_only,
                 "linear_best_option": sorted(linear_best_option_numbers),
                 "cara001_best_option": sorted(cara001_best_option_numbers),
                 "best_cara_indices": sorted(best_cara_indices),
             }
         )
     return situations
+
+
+def filter_lin_only_situations(situations: List[Dict]) -> List[Dict]:
+    """Keep only situations where linear and CARA-optimal labels align."""
+    return [sit for sit in situations if sit.get("is_lin_only")]
 
 
 def build_eval_prompt(prompt_raw: str, prompt_suffix: str) -> str:
@@ -963,6 +1076,7 @@ def run_single_alpha_eval(
         should_save = (
             args.save_every <= 1
             or (session_evaluated % args.save_every == 0)
+            or (args.backup_every > 0 and session_evaluated % args.backup_every == 0)
             or (i + 1 == len(pending_situations))
         )
         if should_save:
@@ -997,6 +1111,7 @@ def run_single_alpha_eval(
     print(f"Completed total: {len(completed_ids)} (resumed {resumed_count}, new {session_evaluated})")
     print(f"Valid responses: {len(valid)} ({100*metrics['parse_rate']:.1f}%)")
     print(f"Failed to parse: {parse_failed_total}")
+    print("Rate denominator note: cooperate/rebel/steal/CARA/LIN rates are computed over parsed responses only.")
     print(f"\n% choosing COOPERATE: {100*metrics['cooperate_rate']:.1f}%")
     print(f"% choosing REBEL:     {100*metrics['rebel_rate']:.1f}%")
     print(f"% choosing STEAL:     {100*metrics['steal_rate']:.1f}%")
@@ -1057,11 +1172,11 @@ def make_alpha_output_path(base_output: str, alpha: float) -> str:
     return str(p.with_name(f"{p.stem}_alpha_{alpha_to_suffix(alpha)}{p.suffix}"))
 
 
-def build_icv_pairs(dpo_pairs_jsonl: str):
+def build_icv_pairs(icv_pairs_jsonl: str):
     """Load prompt/chosen/rejected triplets from JSONL."""
-    path = Path(dpo_pairs_jsonl)
+    path = Path(icv_pairs_jsonl)
     if not path.exists():
-        raise FileNotFoundError(f"DPO pairs file not found: {path}")
+        raise FileNotFoundError(f"ICV pairs file not found: {path}")
 
     pair_rows = read_jsonl(path)
     pairs = []
@@ -1073,7 +1188,7 @@ def build_icv_pairs(dpo_pairs_jsonl: str):
             pairs.append({"prompt": prompt, "chosen": chosen, "rejected": rejected})
 
     if not pairs:
-        raise ValueError("No valid (prompt, chosen, rejected) rows found in DPO pairs JSONL.")
+        raise ValueError("No valid (prompt, chosen, rejected) rows found in ICV pairs JSONL.")
     return pairs
 
 
@@ -1088,15 +1203,15 @@ def main():
     parser.add_argument(
         "--dataset",
         type=str,
-        default="ood_validation",
-        choices=sorted(DATASET_ALIASES.keys()),
+        default="medium_stakes_validation",
+        choices=list(DATASET_ALIASES.keys()),
         help="Built-in dataset alias (ignored if --val_csv is provided)",
     )
     parser.add_argument(
         "--val_csv",
         type=str,
         default=None,
-        help="Path to CSV dataset (overrides --dataset)",
+        help="Advanced: path to custom CSV dataset (overrides --dataset)",
     )
     parser.add_argument("--list_datasets", action="store_true", help="List built-in datasets and exit")
     parser.add_argument("--num_situations", type=int, default=50, help="Number of situations to evaluate")
@@ -1142,6 +1257,11 @@ def main():
         help="Optional extra instruction appended to each prompt before generation",
     )
     parser.add_argument(
+        "--lin_only",
+        action="store_true",
+        help="Filter selected dataset slice to LIN-only situations (where linear and CARA-optimal labels align)",
+    )
+    parser.add_argument(
         "--start_position",
         type=int,
         default=1,
@@ -1167,14 +1287,14 @@ def main():
     parser.add_argument(
         "--save_every",
         type=int,
-        default=1,
-        help="Write checkpoint every N newly evaluated situations (default: 1)",
+        default=5,
+        help="Write checkpoint every N newly evaluated situations (default: 5)",
     )
     parser.add_argument(
         "--backup_every",
         type=int,
-        default=25,
-        help="Write .bak backup every N newly evaluated situations (0 disables backups)",
+        default=20,
+        help="Write .bak backup every N newly evaluated situations (default: 20, 0 disables backups)",
     )
 
     # Steering controls (optional; defaults preserve standard evaluator behavior).
@@ -1197,10 +1317,16 @@ def main():
         help="Optional path to save the constructed steering direction tensor",
     )
     parser.add_argument(
+        "--icv_pairs_jsonl",
+        type=str,
+        default=None,
+        help="JSONL with prompt/chosen/rejected examples used to build ICV direction",
+    )
+    parser.add_argument(
         "--dpo_pairs_jsonl",
         type=str,
         default=None,
-        help="JSONL with prompt/chosen/rejected pairs used to build ICV direction",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument("--icv_layer", type=int, default=None, help="Transformer block index (0-based) for ICV build")
     parser.add_argument(
@@ -1218,13 +1344,35 @@ def main():
     args = parser.parse_args()
 
     if args.list_datasets:
-        print("Built-in datasets:")
-        for name in sorted(DATASET_ALIASES):
-            print(f"  {name:24} -> {resolve_path(DATASET_ALIASES[name])}")
+        print("Built-in datasets (canonical):")
+        for name, rel_path in CANONICAL_DATASET_ALIASES.items():
+            print(f"  {name:32} -> {resolve_path(rel_path)}")
+        print("\nAdditional aliases:")
+        for name, rel_path in EXTRA_DATASET_ALIASES.items():
+            print(f"  {name:32} -> {resolve_path(rel_path)}")
+        print("\nLegacy aliases (backward compatibility):")
+        for legacy_name, canonical_name in LEGACY_DATASET_ALIASES.items():
+            print(f"  {legacy_name:32} -> {canonical_name}")
         return
 
+    if args.icv_pairs_jsonl and args.dpo_pairs_jsonl:
+        raise ValueError("Use only one argument for ICV pairs: --icv_pairs_jsonl (preferred) or --dpo_pairs_jsonl.")
+    if args.dpo_pairs_jsonl and not args.icv_pairs_jsonl:
+        args.icv_pairs_jsonl = args.dpo_pairs_jsonl
+        print("Note: --dpo_pairs_jsonl is deprecated; please use --icv_pairs_jsonl.")
+
+    if args.dataset in LEGACY_DATASET_ALIASES:
+        canonical_dataset = LEGACY_DATASET_ALIASES[args.dataset]
+        print(f"Note: legacy dataset alias '{args.dataset}' mapped to '{canonical_dataset}'.")
+        args.dataset = canonical_dataset
+
+    if args.dataset == "low_stakes_training_lin_only":
+        if not args.lin_only:
+            print("Note: Enabling --lin_only because dataset alias low_stakes_training_lin_only was selected.")
+        args.lin_only = True
+
     if args.val_csv:
-        if args.dataset != "ood_validation":
+        if args.dataset != "medium_stakes_validation":
             print("Note: --val_csv overrides --dataset; using custom dataset path.")
         args.dataset = "custom"
         args.val_csv = resolve_path(args.val_csv)
@@ -1304,6 +1452,10 @@ def main():
         )
     situations = all_situations[args.start_position - 1 : end_position]
     args.end_position = end_position
+    if args.lin_only:
+        before_lin_filter = len(situations)
+        situations = filter_lin_only_situations(situations)
+        print(f"LIN-only filter active: kept {len(situations)}/{before_lin_filter} situations in selected slice.")
     if not situations:
         raise ValueError("No situations selected after applying --start_position/--end_position.")
     print(
@@ -1319,14 +1471,14 @@ def main():
     steering_info = None
 
     nonzero_alphas = [a for a in alphas if abs(a) > 0]
-    if nonzero_alphas and args.steering_direction_path is None and args.dpo_pairs_jsonl is None:
+    if nonzero_alphas and args.steering_direction_path is None and args.icv_pairs_jsonl is None:
         raise ValueError(
             "Non-zero --alphas requires steering direction. Provide --steering_direction_path "
-            "or --dpo_pairs_jsonl (for ICV construction)."
+            "or --icv_pairs_jsonl (for ICV construction)."
         )
 
-    if args.steering_direction_path and args.dpo_pairs_jsonl:
-        raise ValueError("Provide only one direction source: --steering_direction_path OR --dpo_pairs_jsonl")
+    if args.steering_direction_path and args.icv_pairs_jsonl:
+        raise ValueError("Provide only one direction source: --steering_direction_path OR --icv_pairs_jsonl")
 
     if args.steering_direction_path:
         steering_direction = load_steering_direction(args.steering_direction_path)
@@ -1343,8 +1495,13 @@ def main():
             "direction_norm": float(steering_direction.norm(p=2).item()),
         }
 
-    if args.dpo_pairs_jsonl:
-        pairs = build_icv_pairs(args.dpo_pairs_jsonl)
+    if args.icv_pairs_jsonl:
+        if build_icv_direction is None:
+            raise RuntimeError(
+                "ICV construction requested via --icv_pairs_jsonl, but icv_steering_experiment.py "
+                f"could not be imported: {ICV_IMPORT_ERROR}"
+            )
+        pairs = build_icv_pairs(args.icv_pairs_jsonl)
         icv_layer = args.icv_layer if args.icv_layer is not None else (n_layers // 2)
         eval_layer = args.eval_layer if args.eval_layer is not None else icv_layer
 
@@ -1374,7 +1531,7 @@ def main():
         steering_block = layers[eval_layer]
         steering_info = {
             "mode": "icv",
-            "dpo_pairs_jsonl": args.dpo_pairs_jsonl,
+            "icv_pairs_jsonl": args.icv_pairs_jsonl,
             "icv_layer": icv_layer,
             "eval_layer": eval_layer,
             "icv_method": args.icv_method,
@@ -1426,20 +1583,22 @@ def main():
                     "base_model": args.base_model,
                     "model_path": args.model_path,
                     "val_csv": args.val_csv,
-                "num_situations": len(situations),
-                "start_position": args.start_position,
-                "end_position": end_position,
-                "temperature": args.temperature,
-                "max_new_tokens": args.max_new_tokens,
-                "max_time_per_generation": args.max_time_per_generation,
-                "disable_thinking": args.disable_thinking,
-                "alphas": alphas,
-                "resume": args.resume,
-                "save_every": args.save_every,
-                "backup_every": args.backup_every,
-                "stop_after": args.stop_after,
-                "steering": steering_info,
-            },
+                    "num_situations": len(situations),
+                    "start_position": args.start_position,
+                    "end_position": end_position,
+                    "lin_only": args.lin_only,
+                    "temperature": args.temperature,
+                    "max_new_tokens": args.max_new_tokens,
+                    "max_time_per_generation": args.max_time_per_generation,
+                    "disable_thinking": args.disable_thinking,
+                    "alphas": alphas,
+                    "resume": args.resume,
+                    "save_every": args.save_every,
+                    "backup_every": args.backup_every,
+                    "stop_after": args.stop_after,
+                    "selected_situation_ids": [sit["situation_id"] for sit in situations],
+                    "steering": steering_info,
+                },
                 "runs": per_alpha_summaries,
             }
         )

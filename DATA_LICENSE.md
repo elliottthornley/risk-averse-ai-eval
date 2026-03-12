@@ -10,7 +10,7 @@ Creative Commons Attribution 4.0 International License (CC BY 4.0).
 
 This license applies to data files in the [`data/`](data/) directory, including:
 
-- `2026_01_29_new_val_set_probabilities_add_to_100.csv`
+- `2026-03-10_medium_stakes_validation_set_gambles.csv`
 - `2026_03_11_high_stakes_test_set_gambles.csv`
 - `2026_03_11_astronomical_stakes_deployment_set_gambles.csv`
 - `in_distribution_val_set.csv`

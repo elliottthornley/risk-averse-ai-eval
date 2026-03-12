@@ -1,275 +1,142 @@
-# Quick Start Guide
+# Quick Start
 
-## Step 1: Install Dependencies
+## 1) Install
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Step 2: Run Evaluation
-
-By default, `evaluate.py` runs in **chunk mode** (`--stop_after 50`) for safe smoke-testing.
-For one-shot full runs, set `--stop_after` to your full target count.
-
-### Example 1: Evaluate Your Fine-Tuned Model
+## 2) Run a Baseline Eval
 
 ```bash
-# Deterministic evaluation (temperature=0, recommended for benchmarking)
 python evaluate.py \
-    --model_path /path/to/your/model/adapter \
-    --base_model Qwen/Qwen3-8B \
-    --dataset ood_validation \
-    --num_situations 50 \
-    --temperature 0 \
-    --output my_results.json
-
-# Or with sampling (temperature=0.7, optional robustness check)
-python evaluate.py \
-    --model_path /path/to/your/model/adapter \
-    --base_model Qwen/Qwen3-8B \
-    --dataset ood_validation \
-    --num_situations 50 \
-    --temperature 0.7 \
-    --output my_results_temp07.json
+  --model_path /path/to/adapter \
+  --base_model Qwen/Qwen3-8B \
+  --dataset medium_stakes_validation \
+  --num_situations 1200 \
+  --output run.json
 ```
 
-Replace:
-- `/path/to/your/model/adapter` with your LoRA adapter path (e.g., `./my-model/final`)
-- `Qwen/Qwen3-8B` with your base model ID
+## 3) Switch Dataset
 
-**Temperature tips:**
-- `--temperature 0`: Deterministic (greedy decoding) - best for reproducibility
-- `--temperature 0.7`: Moderate sampling - realistic behavior
-- `--temperature 1.0`: High diversity - tests robustness
-
-### Example 2: Evaluate Base Model (No Fine-Tuning)
+Use `--dataset`:
 
 ```bash
-# Evaluate an unfinetuned base model (omit --model_path)
-python evaluate.py \
-    --base_model Qwen/Qwen3-8B \
-    --dataset ood_validation \
-    --num_situations 50 \
-    --temperature 0 \
-    --output base_model_results.json
+# Low-stakes training
+python evaluate.py --dataset low_stakes_training --num_situations 500 --output low_train.json
+
+# Low-stakes validation
+python evaluate.py --dataset low_stakes_validation --num_situations 50 --output low_val.json
+
+# Medium-stakes validation (default)
+python evaluate.py --dataset medium_stakes_validation --num_situations 1200 --output med_val.json
+
+# High-stakes test
+python evaluate.py --dataset high_stakes_test --num_situations 1200 --output high_test.json
+
+# Astronomical-stakes deployment
+python evaluate.py --dataset astronomical_stakes_deployment --num_situations 1200 --output astro.json
 ```
 
-### Example 3: Evaluate on Different Dataset
-
+Show all built-in aliases:
 ```bash
-# Show built-in dataset aliases
 python evaluate.py --list_datasets
-
-# In-distribution validation
-python evaluate.py \
-    --model_path /path/to/your/model \
-    --base_model Qwen/Qwen3-8B \
-    --dataset indist_validation \
-    --num_situations 50 \
-    --temperature 0 \
-    --output indist_results.json
-
-# High-stakes OOD test set
-python evaluate.py \
-    --model_path /path/to/your/model \
-    --base_model Qwen/Qwen3-8B \
-    --dataset high_stakes_test \
-    --num_situations 50 \
-    --temperature 0 \
-    --output high_stakes_results.json
-
-# Astronomical-stakes deployment set
-python evaluate.py \
-    --model_path /path/to/your/model \
-    --base_model Qwen/Qwen3-8B \
-    --dataset astronomical_stakes_deployment \
-    --num_situations 50 \
-    --temperature 0 \
-    --output astronomical_results.json
-
-# Training set (check for overfitting)
-python evaluate.py \
-    --model_path /path/to/your/model \
-    --base_model Qwen/Qwen3-8B \
-    --dataset training \
-    --num_situations 50 \
-    --temperature 0 \
-    --output train_results.json
 ```
 
-### Example 4: Steering Sweep in `evaluate.py`
+## 4) Stop/Resume in Chunks
+
+Default is chunk mode (`--stop_after 50`).
+
+```bash
+# First chunk
+python evaluate.py \
+  --dataset high_stakes_test \
+  --num_situations 1200 \
+  --stop_after 50 \
+  --output high_chunked.json
+
+# Resume next chunk
+python evaluate.py \
+  --dataset high_stakes_test \
+  --num_situations 1200 \
+  --resume \
+  --stop_after 50 \
+  --output high_chunked.json
+```
+
+Keep these fixed across chunks:
+- `--num_situations`
+- `--start_position` / `--end_position`
+- `--output`
+
+## 5) LIN-Only Runs
+
+```bash
+# Explicit LIN-only filter
+python evaluate.py \
+  --dataset low_stakes_training \
+  --lin_only \
+  --num_situations 1200 \
+  --output low_train_lin_only.json
+
+# Equivalent alias
+python evaluate.py \
+  --dataset low_stakes_training_lin_only \
+  --num_situations 1200 \
+  --output low_train_lin_only_alias.json
+```
+
+## 6) ICV Steering Sweep (Same evaluate.py)
 
 ```bash
 python evaluate.py \
-    --base_model Qwen/Qwen3-8B \
-    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
-    --num_situations 25 \
-    --dpo_pairs_jsonl data/dpo_lin_only_20260129_clarified.jsonl \
-    --icv_layer 12 \
-    --eval_layer 12 \
-    --alphas "0.0,0.5,1.0,1.5" \
-    --temperature 0 \
-    --output eval_qwen3_8b_icv_sweep.json
+  --base_model Qwen/Qwen3-8B \
+  --dataset medium_stakes_validation \
+  --lin_only \
+  --icv_pairs_jsonl data/dpo_lin_only_20260129_clarified.jsonl \
+  --icv_layer 12 \
+  --eval_layer 12 \
+  --num_icv_demos 4 \
+  --alphas "0.0,0.5,1.0" \
+  --num_situations 400 \
+  --output icv_sweep.json
 ```
 
-This produces:
-- One output file per alpha (`..._alpha_pos0p5.json`, etc.)
-- A sweep summary file at `--output`
-
-### Example 5: Stop and Resume in Chunks
+## 7) Check Results
 
 ```bash
-# Run the first chunk (50 new situations)
-python evaluate.py \
-    --model_path /path/to/your/model \
-    --base_model Qwen/Qwen3-8B \
-    --dataset high_stakes_test \
-    --num_situations 1200 \
-    --stop_after 50 \
-    --output high_stakes_chunked.json
-
-# Continue from checkpoint (next 50)
-python evaluate.py \
-    --model_path /path/to/your/model \
-    --base_model Qwen/Qwen3-8B \
-    --dataset high_stakes_test \
-    --num_situations 1200 \
-    --resume \
-    --stop_after 50 \
-    --output high_stakes_chunked.json
+python -m json.tool run.json | head -n 60
 ```
 
-Useful flags for reliability:
-- `--save_every 1` (default): checkpoint after every situation
-- `--backup_every 25` (default): periodic `.bak` snapshots
-- `--start_position` / `--end_position`: evaluate a fixed range by dataset order
-- Keep `--num_situations` constant (full target size) across resume runs; use `--stop_after` as the chunk size.
-- Default `--stop_after` is `50`; for one-shot full runs set `--stop_after` to your full target.
+Read these first:
+- `metrics.cooperate_rate` (primary headline)
+- `metrics.rebel_rate`
+- `metrics.steal_rate`
+- `metrics.parse_rate`
+- `metrics.best_cara_rate` (secondary)
 
-### Example 6: Run ICV Steering Experiment (Qwen3-8B Base)
+## 8) Save/Backup Knobs
 
-This runs the in-context-vector steering workflow and evaluates:
-- OOD validation set (`2026_01_29_new_val_set_probabilities_add_to_100.csv`)
-- In-distribution validation set (`in_distribution_val_set.csv`)
-- LIN-only training evaluation set (`training_eval_set_from_full_lin_only.csv`)
+- `--save_every N`: write main checkpoint every N new situations (default `5`)
+- `--backup_every M`: write `.bak` copy every M new situations (default `20`)
 
-Each dataset is evaluated on 25 situations, for each alpha in the sweep.
-It is **not** gradient-based training and does **not** update model weights.
+Suggested presets:
+- safest: `--save_every 1 --backup_every 10`
+- balanced (default-like): `--save_every 5 --backup_every 20`
+- faster I/O: `--save_every 10 --backup_every 20`
 
+For very large outputs, combine with:
 ```bash
-python icv_steering_experiment.py \
-    --base_model Qwen/Qwen3-8B \
-    --dpo_pairs_jsonl data/dpo_lin_only_20260129_clarified.jsonl \
-    --ood_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
-    --indist_csv data/in_distribution_val_set.csv \
-    --train_lin_csv data/training_eval_set_from_full_lin_only.csv \
-    --num_situations 25 \
-    --alphas "0.0,0.5,1.0,1.5" \
-    --output eval_icv_qwen3_8b_base.json
+--no_save_responses
 ```
 
-Useful knobs:
-- `--icv_layer`: transformer layer used to build ICV contrasts (default: middle layer)
-- `--eval_layer`: transformer layer where steering is injected (default: `icv_layer`)
-- `--num_icv_probes`: number of contrast prompts used to estimate the vector
-- `--num_icv_demos`: number of RA/RN demonstrations in-context before each probe prompt
-- `--icv_method pca|mean`: vector estimation method (default: `pca`)
-- `--save_responses`: store full generated responses in output JSON
-
-### Example 7: In-Context Vector Steering (Base Qwen3-8B)
-
-Like Example 5, this is inference-time steering plus evaluation (no weight updates).
+## 9) Inspect Integration (Optional)
 
 ```bash
-python evaluate_icv_steering.py \
-    --base_model Qwen/Qwen3-8B \
-    --dpo_pairs_jsonl data/dpo_lin_only_20260129_clarified.jsonl \
-    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
-    --num_situations 25 \
-    --num_demos 4 \
-    --num_anchors 64 \
-    --layer_indices middle \
-    --vector_method pca \
-    --alpha_values 0,0.25,0.5,1.0 \
-    --temperature 0 \
-    --output eval_icv_qwen3_8b_base_25.json
-```
-
-This runs baseline (`alpha=0`) and steered settings in one job, then reports the best alpha by CARA rate.
-
-### Example 8: Run on Inspect
-
-```bash
+pip install inspect-ai
 python3 -m inspect_ai eval inspect_risk_averse_eval.py@risk_averse_eval \
-    --model openai/gpt-4o-mini \
-    -T val_csv="data/2026-01-29, New merged val set with Rebels and Steals.csv" \
-    -T num_situations=50 \
-    -T temperature=0.7 \
-    -T max_tokens=4096
+  --model openai/gpt-4o-mini \
+  -T val_csv="data/2026-03-10_medium_stakes_validation_set_gambles.csv" \
+  -T num_situations=50 \
+  -T temperature=0
 ```
-
-## Step 3: Check Results
-
-```bash
-cat my_results.json | python -m json.tool | head -30
-```
-
-Look for:
-- **`best_cara_rate`**: Your primary metric (target: >0.80)
-- **`parse_rate`**: Should be >0.90 (if lower, see troubleshooting)
-- **`cooperate_rate`**, **`rebel_rate`**, **`steal_rate`**: Option type breakdown showing model's risk profile
-
-## Common Issues
-
-### Issue: Low Parse Rate (<90%)
-
-**Solution:** Check what the model is outputting:
-```bash
-# Look at saved responses in the JSON
-python -c "import json; data=json.load(open('my_results.json')); print(data['failed_responses'][0])"
-```
-
-### Issue: Out of Memory
-
-**Solution:** Reduce number of situations or use quantization:
-```bash
-python evaluate.py \
-    --model_path /path/to/your/model \
-    --base_model Qwen/Qwen3-8B \
-    --dataset ood_validation \
-    --num_situations 25 \
-    --output results.json
-```
-
-### Issue: Qwen3 Base Model Hangs
-
-**Solution:** The script automatically disables thinking mode for base models (when `--model_path` is omitted). If you're still seeing hangs with a fine-tuned model, manually disable it:
-```bash
-python evaluate.py \
-    --model_path /path/to/your/model \
-    --base_model Qwen/Qwen3-8B \
-    --disable_thinking \
-    --output results.json
-```
-
-## What's Next?
-
-- Read the full [README.md](README.md) for detailed documentation
-- Compare results across different models
-- Evaluate on multiple datasets (OOD, in-distribution, training)
-- Share results with your team!
-
-## Expected Performance
-
-Based on Jan 2026 experiments:
-
-| Model Type | Expected CARA Rate |
-|------------|-------------------|
-| Base (unfinetuned) | 30-55% |
-| Fine-tuned (good) | 75-85% |
-| Fine-tuned (excellent) | 85-90%+ |
-
-If your fine-tuned model is <70% CARA, investigate:
-1. Training data quality
-2. Hyperparameters (LoRA rank, learning rate, epochs)
-3. Parse rate (make sure model is following output format)

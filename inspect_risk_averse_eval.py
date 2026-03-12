@@ -236,7 +236,7 @@ def steal_rate_scorer():
 
 @task
 def risk_averse_eval(
-    val_csv: str = "data/2026-01-29, New merged val set with Rebels and Steals.csv",
+    val_csv: str = "data/2026-03-10_medium_stakes_validation_set_gambles.csv",
     num_situations: int = 50,
     prompt_suffix: str = "",
     temperature: float = 0.7,

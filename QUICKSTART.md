@@ -8,6 +8,9 @@ pip install -r requirements.txt
 
 ## Step 2: Run Evaluation
 
+By default, `evaluate.py` runs in **chunk mode** (`--stop_after 50`) for safe smoke-testing.
+For one-shot full runs, set `--stop_after` to your full target count.
+
 ### Example 1: Evaluate Your Fine-Tuned Model
 
 ```bash
@@ -113,7 +116,37 @@ This produces:
 - One output file per alpha (`..._alpha_pos0p5.json`, etc.)
 - A sweep summary file at `--output`
 
-### Example 5: Run ICV Steering Experiment (Qwen3-8B Base)
+### Example 5: Stop and Resume in Chunks
+
+```bash
+# Run the first chunk (50 new situations)
+python evaluate.py \
+    --model_path /path/to/your/model \
+    --base_model Qwen/Qwen3-8B \
+    --dataset high_stakes_test \
+    --num_situations 1200 \
+    --stop_after 50 \
+    --output high_stakes_chunked.json
+
+# Continue from checkpoint (next 50)
+python evaluate.py \
+    --model_path /path/to/your/model \
+    --base_model Qwen/Qwen3-8B \
+    --dataset high_stakes_test \
+    --num_situations 1200 \
+    --resume \
+    --stop_after 50 \
+    --output high_stakes_chunked.json
+```
+
+Useful flags for reliability:
+- `--save_every 1` (default): checkpoint after every situation
+- `--backup_every 25` (default): periodic `.bak` snapshots
+- `--start_position` / `--end_position`: evaluate a fixed range by dataset order
+- Keep `--num_situations` constant (full target size) across resume runs; use `--stop_after` as the chunk size.
+- Default `--stop_after` is `50`; for one-shot full runs set `--stop_after` to your full target.
+
+### Example 6: Run ICV Steering Experiment (Qwen3-8B Base)
 
 This runs the in-context-vector steering workflow and evaluates:
 - OOD validation set (`2026_01_29_new_val_set_probabilities_add_to_100.csv`)
@@ -143,7 +176,7 @@ Useful knobs:
 - `--icv_method pca|mean`: vector estimation method (default: `pca`)
 - `--save_responses`: store full generated responses in output JSON
 
-### Example 6: In-Context Vector Steering (Base Qwen3-8B)
+### Example 7: In-Context Vector Steering (Base Qwen3-8B)
 
 Like Example 5, this is inference-time steering plus evaluation (no weight updates).
 
@@ -164,7 +197,7 @@ python evaluate_icv_steering.py \
 
 This runs baseline (`alpha=0`) and steered settings in one job, then reports the best alpha by CARA rate.
 
-### Example 7: Run on Inspect
+### Example 8: Run on Inspect
 
 ```bash
 python3 -m inspect_ai eval inspect_risk_averse_eval.py@risk_averse_eval \

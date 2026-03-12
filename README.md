@@ -38,6 +38,12 @@ python evaluate.py \
 - `--val_csv`: Custom dataset CSV path (overrides `--dataset`)
 - `--list_datasets`: Print built-in datasets and exit
 - `--num_situations`: Number of situations to evaluate (default: 50)
+- `--start_position`: 1-based start position in dataset order (default: 1)
+- `--end_position`: 1-based inclusive end position in dataset order (default: end of selected dataset slice)
+- `--stop_after`: Evaluate at most this many NEW situations in this invocation (default: 50 for safe smoke tests)
+- `--resume`: Resume from existing output checkpoint
+- `--save_every`: Save checkpoint every N newly evaluated situations (default: 1)
+- `--backup_every`: Save `.bak` backup every N newly evaluated situations (default: 25, set 0 to disable)
 - `--temperature`: Sampling temperature (default: 0)
   - `0` = deterministic (greedy decoding)
   - `0.7` = moderate sampling
@@ -115,6 +121,47 @@ python evaluate.py \
 This writes one file per alpha (e.g. `..._alpha_pos0p5.json`) and a sweep summary at `--output`.
 
 **What "command-line configuration" means:** You can control everything via `--flags` on the command line (temperature, model path, dataset, etc.) without editing code. The comprehensive script below requires editing the Python file itself.
+
+### Stop/Resume Workflow (Crash-Safe)
+
+`evaluate.py` writes checkpoints incrementally and supports resume from the same output file.
+
+```bash
+# Run first 50 situations from a larger 1200-situation target
+python evaluate.py \
+    --model_path ./my-model/final \
+    --dataset high_stakes_test \
+    --num_situations 1200 \
+    --stop_after 50 \
+    --output high_stakes_run.json
+
+# Continue from where it left off
+python evaluate.py \
+    --model_path ./my-model/final \
+    --dataset high_stakes_test \
+    --num_situations 1200 \
+    --resume \
+    --stop_after 50 \
+    --output high_stakes_run.json
+```
+
+Notes:
+- Default behavior runs in chunks of 50 new situations (`--stop_after 50`) so you can sanity-check before full runs.
+- Checkpoints are saved every situation by default (`--save_every 1`).
+- A backup file (`.bak`) is written periodically (`--backup_every 25` by default).
+- Resume uses existing `results` or `resume_records` from the output JSON and skips already completed `situation_id`s.
+- Keep `--num_situations` fixed to the full target (e.g., 1200) across chunked runs; use `--stop_after` to control chunk size.
+- Checkpoints include `num_parse_failed` and `progress.next_situation_id` for quick monitoring/restart sanity checks.
+- For one-shot runs, set `--stop_after` to your full target count (e.g., `--stop_after 1200`).
+
+### Speed Tips
+
+`evaluate.py` now pre-tokenizes prompts once per invocation and runs generation under `torch.inference_mode()` to reduce overhead.
+
+If evaluations are still slow, these settings usually help most:
+- `--temperature 0` and `--disable_thinking` (deterministic, shorter generations)
+- Lower `--max_new_tokens` (e.g., `512` or `1024`)
+- `--no_save_responses` and/or larger `--save_every` to reduce disk I/O overhead
 
 ### 2. `evaluate_comprehensive.py`
 

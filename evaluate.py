@@ -11,6 +11,8 @@ import gc
 import json
 import os
 import re
+import shlex
+import shutil
 import sys
 import time
 from datetime import datetime
@@ -194,6 +196,85 @@ def alpha_to_suffix(alpha: float) -> str:
     return f"{prefix}{magnitude}"
 
 
+def format_repro_command(args, output_path: str, *, resume: bool) -> str:
+    """Build a copy/paste command that reproduces current run settings."""
+    cmd = ["python evaluate.py"]
+    if args.model_path:
+        cmd.extend(["--model_path", shlex.quote(str(args.model_path))])
+    cmd.extend(["--base_model", shlex.quote(str(args.base_model))])
+
+    if args.dataset == "custom":
+        cmd.extend(["--val_csv", shlex.quote(str(args.val_csv))])
+    else:
+        cmd.extend(["--dataset", shlex.quote(str(args.dataset))])
+
+    cmd.extend(["--num_situations", str(args.num_situations)])
+    cmd.extend(["--start_position", str(args.start_position)])
+    if args.end_position is not None:
+        cmd.extend(["--end_position", str(args.end_position)])
+    if args.stop_after is not None:
+        cmd.extend(["--stop_after", str(args.stop_after)])
+    cmd.extend(["--temperature", str(args.temperature)])
+    cmd.extend(["--max_new_tokens", str(args.max_new_tokens)])
+    cmd.extend(["--max_time_per_generation", str(args.max_time_per_generation)])
+
+    if args.prompt_suffix:
+        cmd.extend(["--prompt_suffix", shlex.quote(str(args.prompt_suffix))])
+    if args.no_save_responses:
+        cmd.append("--no_save_responses")
+    if args.disable_thinking:
+        cmd.append("--disable_thinking")
+    if resume:
+        cmd.append("--resume")
+
+    cmd.extend(["--output", shlex.quote(str(output_path))])
+    return " ".join(cmd)
+
+
+def print_stop_resume_banner(
+    args,
+    output_path: str,
+    *,
+    target_total: int,
+    completed: int,
+    pending_this_invocation: int,
+):
+    """Print a high-visibility stop/resume guide for co-authors."""
+    print("\n" + "!" * 88)
+    print("IMPORTANT: CHUNKED EVAL MODE (STOP/RESUME QUICKSTART)")
+    print("!" * 88)
+    print(
+        f"Target slice: {target_total} situations | already completed: {completed} | "
+        f"planned this invocation: {pending_this_invocation}"
+    )
+    print(
+        "Keep these fixed across chunks: --num_situations, --start_position, --end_position, "
+        "and --output."
+    )
+    print(
+        f"Current settings: --num_situations {args.num_situations}, --stop_after {args.stop_after}, "
+        f"--start_position {args.start_position}, --end_position {args.end_position}"
+    )
+
+    first_chunk_cmd = format_repro_command(args, output_path, resume=False)
+    resume_cmd = format_repro_command(args, output_path, resume=True)
+    print("\nCopy/paste commands:")
+    print(f"  First chunk:  {first_chunk_cmd}")
+    print(f"  Resume next:  {resume_cmd}")
+
+    if args.stop_after is not None:
+        print(
+            f"\nTo run this entire slice in one invocation, set --stop_after >= {target_total} "
+            "(or set it exactly to your full target count)."
+        )
+
+    print("\nPerformance tips if generation is slow:")
+    print("  1) Keep --temperature 0 and include --disable_thinking")
+    print("  2) Lower --max_new_tokens (e.g., 512 or 1024)")
+    print("  3) Reduce checkpoint overhead with --no_save_responses and/or larger --save_every")
+    print("!" * 88 + "\n")
+
+
 def get_input_device(model):
     """Best-effort model input device for tokenized tensors."""
     try:
@@ -266,24 +347,149 @@ def summarize_results(results):
     }
 
 
+def count_parse_failures(results: List[Dict]) -> int:
+    """Count situations where parser failed to extract a valid option."""
+    return sum(1 for row in results if row.get("option_type") is None)
+
+
+def atomic_write_json(path: str, payload: Dict):
+    """Write JSON atomically to reduce corruption risk on interruption."""
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = output_path.with_name(f"{output_path.name}.tmp")
+    with open(tmp_path, "w") as f:
+        json.dump(payload, f, indent=2)
+    os.replace(tmp_path, output_path)
+
+
+def compact_results_for_resume(results: List[Dict]) -> List[Dict]:
+    """Persist only fields needed for resume + metric recomputation."""
+    keep_keys = {
+        "situation_id",
+        "choice",
+        "choice_index",
+        "parser_strategy",
+        "option_type",
+        "is_best_cara",
+        "is_best_linear",
+        "response_length",
+        "num_tokens_generated",
+        "generation_time_seconds",
+        "probability_format",
+        "bucket_label",
+        "linear_best_option",
+        "cara001_best_option",
+        "num_options",
+    }
+    compact = []
+    for row in results:
+        compact.append({k: row.get(k) for k in keep_keys})
+    return compact
+
+
+def dedupe_results_by_situation(results: List[Dict], ordered_situation_ids: List[int]) -> List[Dict]:
+    """Deduplicate by situation_id and preserve dataset order."""
+    latest_by_id = {}
+    for row in results:
+        sid = row.get("situation_id")
+        if sid is None:
+            continue
+        latest_by_id[sid] = row
+
+    deduped = [latest_by_id[sid] for sid in ordered_situation_ids if sid in latest_by_id]
+    return deduped
+
+
+def load_existing_run_state(
+    output_path: str,
+    ordered_situation_ids: List[int],
+    *,
+    allow_backup_fallback: bool = True,
+):
+    """Load resumable state from output JSON (or .bak fallback)."""
+    candidates = [Path(output_path)]
+    if allow_backup_fallback:
+        candidates.append(Path(f"{output_path}.bak"))
+
+    loaded = None
+    loaded_from = None
+    last_error = None
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        try:
+            with open(candidate, "r") as f:
+                loaded = json.load(f)
+            loaded_from = str(candidate)
+            break
+        except Exception as exc:
+            last_error = exc
+
+    if loaded is None:
+        if last_error is not None:
+            raise RuntimeError(
+                f"Found prior output but failed to parse JSON: {output_path} ({last_error})"
+            ) from last_error
+        return None
+
+    results = loaded.get("results")
+    if not isinstance(results, list):
+        results = loaded.get("resume_records")
+    if not isinstance(results, list):
+        raise ValueError(
+            "Cannot resume: output JSON does not contain resumable records. "
+            "Expected `results` or `resume_records` as a list."
+        )
+
+    ordered_id_set = set(ordered_situation_ids)
+    rows_in_target = [r for r in results if r.get("situation_id") in ordered_id_set]
+    deduped_results = dedupe_results_by_situation(results, ordered_situation_ids)
+    dropped_duplicates = max(len(rows_in_target) - len(deduped_results), 0)
+
+    failed = loaded.get("failed_responses_sample")
+    if not isinstance(failed, list):
+        failed = loaded.get("failed_responses")
+    if not isinstance(failed, list):
+        failed = []
+
+    return {
+        "loaded_from": loaded_from,
+        "payload": loaded,
+        "results": deduped_results,
+        "failed_responses": failed,
+        "dropped_duplicates": dropped_duplicates,
+    }
+
+
 def save_incremental(
     output_path,
     args,
     results,
     failed_responses,
     situations_evaluated,
+    target_situation_ids,
     *,
     steering_alpha: float,
     steering_info: Optional[Dict] = None,
+    create_backup: bool = False,
 ):
     """Save current run state to disk for crash resilience."""
     metrics = summarize_results(results)
     valid = [r for r in results if r["option_type"] is not None]
+    done_ids = {r.get("situation_id") for r in results if r.get("situation_id") is not None}
+    target_situation_ids = list(target_situation_ids)
+    target_total = len(target_situation_ids)
+    target_completed = sum(1 for sid in target_situation_ids if sid in done_ids)
+    next_situation_id = next((sid for sid in target_situation_ids if sid not in done_ids), None)
 
     eval_cfg = {
         "temperature": args.temperature,
         "max_new_tokens": args.max_new_tokens,
-        "num_situations": situations_evaluated,
+        "num_situations": target_total,
+        "num_situations_completed": target_completed,
+        "start_position": args.start_position,
+        "end_position": args.end_position,
+        "stop_after": args.stop_after,
         "base_model": args.base_model,
         "model_path": args.model_path,
         "dataset": args.dataset,
@@ -293,19 +499,34 @@ def save_incremental(
     if steering_info:
         eval_cfg["steering"] = steering_info
 
+    parse_failed_total = count_parse_failures(results)
+    failed_sample = failed_responses[-10:]
+
     output_data = convert_numpy(
         {
             "evaluation_config": eval_cfg,
             "metrics": metrics,
             "num_valid": len(valid),
             "num_total": len(results),
+            "num_parse_failed": parse_failed_total,
             "results": None if args.no_save_responses else results,
-            "failed_responses": failed_responses[:10],
+            "resume_records": compact_results_for_resume(results),
+            "failed_responses": failed_sample,  # Backwards-compatible key name.
+            "failed_responses_sample": failed_sample,
+            "progress": {
+                "target_total": target_total,
+                "completed": target_completed,
+                "remaining": max(target_total - target_completed, 0),
+                "next_situation_id": next_situation_id,
+                "checkpoint_index": situations_evaluated,
+            },
         }
     )
 
-    with open(output_path, "w") as f:
-        json.dump(output_data, f, indent=2)
+    atomic_write_json(output_path, output_data)
+    if create_backup:
+        backup_path = f"{output_path}.bak"
+        shutil.copy2(output_path, backup_path)
 
 
 def build_situations(df: pd.DataFrame, num_situations: int):
@@ -399,27 +620,61 @@ def build_situations(df: pd.DataFrame, num_situations: int):
     return situations
 
 
-def generate_response(
-    *,
-    model,
-    tokenizer,
-    eval_prompt: str,
-    temperature: float,
-    max_new_tokens: int,
-    max_time_per_generation: float,
-    disable_thinking: bool,
-    steering_block=None,
-    steering_direction: Optional[torch.Tensor] = None,
-    steering_alpha: float = 0.0,
-):
-    """Generate one response, optionally with residual-stream steering."""
+def build_eval_prompt(prompt_raw: str, prompt_suffix: str) -> str:
+    """Construct eval prompt once so we avoid repeated string work in the hot loop."""
+    prompt = remove_instruction_suffix(prompt_raw)
+    return f"{prompt}\n\n{prompt_suffix}".strip() if prompt_suffix else prompt
+
+
+def prepare_generation_inputs(tokenizer, eval_prompt: str, disable_thinking: bool):
+    """Tokenize once on CPU to reduce per-generation overhead."""
     messages = [{"role": "user", "content": eval_prompt}]
     template_kwargs = {"tokenize": False, "add_generation_prompt": True}
     if disable_thinking:
         template_kwargs["enable_thinking"] = False
     text = tokenizer.apply_chat_template(messages, **template_kwargs)
+    encoded = tokenizer(text, return_tensors="pt")
+    input_ids = encoded["input_ids"][0].cpu()
+    attention_mask = encoded.get("attention_mask")
+    if attention_mask is None:
+        attention_mask = torch.ones_like(input_ids)
+    else:
+        attention_mask = attention_mask[0].cpu()
+    return {
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+    }
 
-    inputs = tokenizer(text, return_tensors="pt").to(get_input_device(model))
+
+def generate_response(
+    *,
+    model,
+    tokenizer,
+    eval_prompt: Optional[str],
+    temperature: float,
+    max_new_tokens: int,
+    max_time_per_generation: float,
+    disable_thinking: bool,
+    prepared_inputs: Optional[Dict[str, torch.Tensor]] = None,
+    steering_block=None,
+    steering_direction: Optional[torch.Tensor] = None,
+    steering_alpha: float = 0.0,
+):
+    """Generate one response, optionally with residual-stream steering."""
+    if prepared_inputs is None:
+        if eval_prompt is None:
+            raise ValueError("Either eval_prompt or prepared_inputs must be provided.")
+        prepared_inputs = prepare_generation_inputs(
+            tokenizer=tokenizer,
+            eval_prompt=eval_prompt,
+            disable_thinking=disable_thinking,
+        )
+
+    input_device = get_input_device(model)
+    inputs = {
+        "input_ids": prepared_inputs["input_ids"].unsqueeze(0).to(input_device),
+        "attention_mask": prepared_inputs["attention_mask"].unsqueeze(0).to(input_device),
+    }
 
     hook = None
     if steering_block is not None and steering_direction is not None and abs(steering_alpha) > 0:
@@ -429,12 +684,13 @@ def generate_response(
 
     gen_start = time.time()
     try:
-        with torch.no_grad():
+        with torch.inference_mode():
             if temperature == 0:
                 outputs = model.generate(
                     **inputs,
                     max_new_tokens=max_new_tokens,
                     do_sample=False,
+                    use_cache=True,
                     pad_token_id=tokenizer.eos_token_id,
                     max_time=max_time_per_generation,
                 )
@@ -444,6 +700,7 @@ def generate_response(
                     max_new_tokens=max_new_tokens,
                     temperature=temperature,
                     do_sample=True,
+                    use_cache=True,
                     pad_token_id=tokenizer.eos_token_id,
                     max_time=max_time_per_generation,
                 )
@@ -470,33 +727,144 @@ def run_single_alpha_eval(
     steering_direction: Optional[torch.Tensor] = None,
 ):
     """Run one evaluation pass for a single alpha value."""
+    target_situation_ids = [sit["situation_id"] for sit in situations]
     print(f"Evaluating on {len(situations)} situations with PERMISSIVE parser...")
     print(f"Temperature: {args.temperature} ({'deterministic' if args.temperature == 0 else 'sampling'})")
     print(f"Steering alpha: {steering_alpha:+.4f}")
     print(f"Max time per generation: {args.max_time_per_generation}s")
     print(f"Saving CoT responses: {'NO (--no_save_responses)' if args.no_save_responses else 'YES (default)'}")
+    print(f"Checkpoint frequency: every {args.save_every} situation(s)")
+    if args.backup_every > 0:
+        print(f"Backup frequency: every {args.backup_every} situation(s) -> {output_path}.bak")
     print(f"Results will be saved incrementally to: {output_path}")
     print()
 
     results = []
     failed_responses = []
     generation_times = []
+    completed_ids = set()
+    resumed_count = 0
+
+    if args.resume:
+        prior_state = load_existing_run_state(output_path, target_situation_ids)
+        if prior_state is not None:
+            results = prior_state["results"]
+            failed_responses = prior_state["failed_responses"]
+            completed_ids = {r.get("situation_id") for r in results if r.get("situation_id") is not None}
+            resumed_count = len(completed_ids)
+            loaded_from = prior_state["loaded_from"]
+            print(f"Resuming from existing checkpoint: {loaded_from}")
+            print(f"Already completed: {resumed_count}/{len(situations)} situations")
+            dropped_duplicates = int(prior_state.get("dropped_duplicates", 0) or 0)
+            if dropped_duplicates > 0:
+                print(
+                    f"WARNING: Dropped {dropped_duplicates} duplicate checkpoint rows by situation_id "
+                    "while resuming."
+                )
+
+            prior_cfg = prior_state["payload"].get("evaluation_config", {})
+            prior_dataset = prior_cfg.get("dataset")
+            prior_val_csv = prior_cfg.get("val_csv")
+            if prior_dataset and prior_dataset != args.dataset:
+                print(
+                    f"WARNING: Resume dataset mismatch (checkpoint={prior_dataset}, current={args.dataset}). "
+                    "Proceeding with current target slice."
+                )
+            if prior_val_csv and str(prior_val_csv) != str(args.val_csv):
+                print(
+                    "WARNING: Resume val_csv differs from current run.\n"
+                    f"  checkpoint: {prior_val_csv}\n"
+                    f"  current:    {args.val_csv}"
+                )
+            for field in (
+                "base_model",
+                "model_path",
+                "temperature",
+                "max_new_tokens",
+                "start_position",
+                "end_position",
+            ):
+                prior_value = prior_cfg.get(field)
+                current_value = getattr(args, field, None)
+                if prior_value is not None and prior_value != current_value:
+                    print(
+                        f"WARNING: Resume {field} differs from checkpoint "
+                        f"(checkpoint={prior_value}, current={current_value})."
+                    )
+        else:
+            print("Resume requested but no prior checkpoint found; starting fresh.")
+    elif Path(output_path).exists():
+        print(
+            "WARNING: Output file already exists and will be overwritten. "
+            "Use --resume to continue an existing run."
+        )
+
+    pending_situations = [sit for sit in situations if sit["situation_id"] not in completed_ids]
+    if args.stop_after is not None:
+        pending_situations = pending_situations[: args.stop_after]
+        print(f"Stop-after mode: evaluating at most {len(pending_situations)} new situations this run.")
+
+    print_stop_resume_banner(
+        args=args,
+        output_path=output_path,
+        target_total=len(situations),
+        completed=len(completed_ids),
+        pending_this_invocation=len(pending_situations),
+    )
+
+    if not pending_situations:
+        print("No pending situations for this run. Writing fresh summary from existing checkpoint data.")
+        save_incremental(
+            output_path,
+            args,
+            results,
+            failed_responses,
+            len(results),
+            target_situation_ids,
+            steering_alpha=steering_alpha,
+            steering_info=steering_info,
+            create_backup=True,
+        )
+        metrics = summarize_results(results)
+        valid = [r for r in results if r["option_type"] is not None]
+        parse_failed_total = count_parse_failures(results)
+        return {
+            "output_path": output_path,
+            "alpha": steering_alpha,
+            "metrics": metrics,
+            "num_valid": len(valid),
+            "num_total": len(results),
+            "num_parse_failed": parse_failed_total,
+            "num_resumed": resumed_count,
+            "num_new": 0,
+        }
+
+    prep_start = time.time()
+    for sit in pending_situations:
+        eval_prompt = build_eval_prompt(sit["prompt_raw"], args.prompt_suffix)
+        sit["eval_prompt"] = eval_prompt
+        sit["prepared_inputs"] = prepare_generation_inputs(
+            tokenizer=tokenizer,
+            eval_prompt=eval_prompt,
+            disable_thinking=args.disable_thinking,
+        )
+    print(f"Prepared prompts/tokenization for {len(pending_situations)} situation(s) in {time.time() - prep_start:.1f}s.")
+
     eval_start_time = time.time()
-
-    for i, sit in enumerate(situations):
+    session_evaluated = 0
+    for i, sit in enumerate(pending_situations):
         sit_start = time.time()
-
-        prompt = remove_instruction_suffix(sit["prompt_raw"])
-        eval_prompt = f"{prompt}\n\n{args.prompt_suffix}".strip() if args.prompt_suffix else prompt
+        eval_prompt = sit["eval_prompt"]
 
         response, num_generated_tokens, gen_elapsed = generate_response(
             model=model,
             tokenizer=tokenizer,
-            eval_prompt=eval_prompt,
+            eval_prompt=None,
             temperature=args.temperature,
             max_new_tokens=args.max_new_tokens,
             max_time_per_generation=args.max_time_per_generation,
             disable_thinking=args.disable_thinking,
+            prepared_inputs=sit["prepared_inputs"],
             steering_block=steering_block,
             steering_direction=steering_direction,
             steering_alpha=steering_alpha,
@@ -561,16 +929,22 @@ def run_single_alpha_eval(
                     "response": response,
                 }
             )
+            # Keep only a bounded in-memory sample of failures for debugging output.
+            if len(failed_responses) > 100:
+                failed_responses = failed_responses[-100:]
 
+        completed_ids.add(sit["situation_id"])
+        session_evaluated += 1
         generation_times.append(gen_elapsed)
         _sit_elapsed = time.time() - sit_start
         avg_time = sum(generation_times) / len(generation_times)
-        remaining = avg_time * (len(situations) - i - 1)
+        remaining_situations = len(situations) - len(completed_ids)
+        remaining = avg_time * remaining_situations
 
         status = "OK" if choice else "PARSE_FAIL"
         strategy_text = parser_strategy if parser_strategy else "none"
         print(
-            f"  [{i+1}/{len(situations)}] sit_id={sit['situation_id']} | {status} "
+            f"  [{len(completed_ids)}/{len(situations)}] sit_id={sit['situation_id']} | {status} "
             f"({strategy_text}) | {int(num_generated_tokens)} tokens | {gen_elapsed:.1f}s | "
             f"ETA: {remaining/60:.1f}min"
         )
@@ -586,36 +960,54 @@ def run_single_alpha_eval(
                 "Response may be truncated. Consider --max_new_tokens increase."
             )
 
-        save_incremental(
-            output_path,
-            args,
-            results,
-            failed_responses,
-            i + 1,
-            steering_alpha=steering_alpha,
-            steering_info=steering_info,
+        should_save = (
+            args.save_every <= 1
+            or (session_evaluated % args.save_every == 0)
+            or (i + 1 == len(pending_situations))
         )
+        if should_save:
+            should_backup = (
+                args.backup_every > 0
+                and (
+                    (session_evaluated % args.backup_every == 0)
+                    or (i + 1 == len(pending_situations))
+                )
+            )
+            save_incremental(
+                output_path,
+                args,
+                results,
+                failed_responses,
+                len(results),
+                target_situation_ids,
+                steering_alpha=steering_alpha,
+                steering_info=steering_info,
+                create_backup=should_backup,
+            )
 
     total_elapsed = time.time() - eval_start_time
     metrics = summarize_results(results)
     valid = [r for r in results if r["option_type"] is not None]
+    parse_failed_total = count_parse_failures(results)
 
     print(f"\n{'='*50}")
     print("EVALUATION RESULTS (Permissive Parser)")
     print("=" * 50)
-    print(f"Total situations: {len(situations)}")
+    print(f"Target situations: {len(situations)}")
+    print(f"Completed total: {len(completed_ids)} (resumed {resumed_count}, new {session_evaluated})")
     print(f"Valid responses: {len(valid)} ({100*metrics['parse_rate']:.1f}%)")
-    print(f"Failed to parse: {len(failed_responses)}")
+    print(f"Failed to parse: {parse_failed_total}")
     print(f"\n% choosing COOPERATE: {100*metrics['cooperate_rate']:.1f}%")
     print(f"% choosing REBEL:     {100*metrics['rebel_rate']:.1f}%")
     print(f"% choosing STEAL:     {100*metrics['steal_rate']:.1f}%")
     print(f"% choosing best CARA: {100*metrics['best_cara_rate']:.1f}%")
     print(f"% choosing best LIN:  {100*metrics['best_linear_rate']:.1f}%")
     print(f"\nTotal time: {total_elapsed/60:.1f} minutes ({total_elapsed:.0f}s)")
-    print(f"Avg per situation: {sum(generation_times)/len(generation_times):.1f}s")
+    avg_per_sit = (sum(generation_times)/len(generation_times)) if generation_times else 0.0
+    print(f"Avg per situation (this session): {avg_per_sit:.1f}s")
     print(
         "Avg tokens generated: "
-        f"{sum(r.get('num_tokens_generated', 0) for r in results)/len(results):.0f}"
+        f"{(sum(r.get('num_tokens_generated', 0) for r in results)/len(results)) if results else 0:.0f}"
     )
     print("=" * 50)
 
@@ -633,11 +1025,19 @@ def run_single_alpha_eval(
         args,
         results,
         failed_responses,
-        len(situations),
+        len(results),
+        target_situation_ids,
         steering_alpha=steering_alpha,
         steering_info=steering_info,
+        create_backup=True,
     )
     print(f"\nFinal results saved to {output_path}")
+
+    if len(completed_ids) < len(situations):
+        print(
+            f"Run paused with {len(situations) - len(completed_ids)} situations remaining. "
+            f"Resume with: --resume --output {output_path}"
+        )
 
     return {
         "output_path": output_path,
@@ -645,6 +1045,9 @@ def run_single_alpha_eval(
         "metrics": metrics,
         "num_valid": len(valid),
         "num_total": len(results),
+        "num_parse_failed": parse_failed_total,
+        "num_resumed": resumed_count,
+        "num_new": session_evaluated,
     }
 
 
@@ -738,6 +1141,41 @@ def main():
         default="",
         help="Optional extra instruction appended to each prompt before generation",
     )
+    parser.add_argument(
+        "--start_position",
+        type=int,
+        default=1,
+        help="1-based position in dataset order to start from (default: 1)",
+    )
+    parser.add_argument(
+        "--end_position",
+        type=int,
+        default=None,
+        help="1-based inclusive end position in dataset order (default: dataset end)",
+    )
+    parser.add_argument(
+        "--stop_after",
+        type=int,
+        default=50,
+        help="Evaluate at most this many NEW situations in this invocation (default: 50)",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume from existing output JSON if present",
+    )
+    parser.add_argument(
+        "--save_every",
+        type=int,
+        default=1,
+        help="Write checkpoint every N newly evaluated situations (default: 1)",
+    )
+    parser.add_argument(
+        "--backup_every",
+        type=int,
+        default=25,
+        help="Write .bak backup every N newly evaluated situations (0 disables backups)",
+    )
 
     # Steering controls (optional; defaults preserve standard evaluator behavior).
     parser.add_argument(
@@ -798,6 +1236,16 @@ def main():
             f"Dataset file not found: {args.val_csv}\n"
             "Use --list_datasets to see built-in options or provide --val_csv."
         )
+    if args.start_position < 1:
+        raise ValueError("--start_position must be >= 1")
+    if args.end_position is not None and args.end_position < args.start_position:
+        raise ValueError("--end_position must be >= --start_position")
+    if args.save_every < 1:
+        raise ValueError("--save_every must be >= 1")
+    if args.backup_every < 0:
+        raise ValueError("--backup_every must be >= 0")
+    if args.stop_after is not None and args.stop_after < 1:
+        raise ValueError("--stop_after must be >= 1")
 
     alphas = parse_alpha_list(args.alphas)
 
@@ -847,7 +1295,21 @@ def main():
     validate_dataset_columns(df, args.val_csv)
     print(f"Dataset alias: {args.dataset}")
     print(f"Dataset path:  {args.val_csv}")
-    situations = build_situations(df, args.num_situations)
+    all_situations = build_situations(df, args.num_situations)
+
+    end_position = args.end_position if args.end_position is not None else len(all_situations)
+    if args.start_position > len(all_situations):
+        raise ValueError(
+            f"--start_position ({args.start_position}) is beyond available situations ({len(all_situations)})."
+        )
+    situations = all_situations[args.start_position - 1 : end_position]
+    args.end_position = end_position
+    if not situations:
+        raise ValueError("No situations selected after applying --start_position/--end_position.")
+    print(
+        f"Selected situation positions: {args.start_position}.."
+        f"{args.start_position + len(situations) - 1} (count={len(situations)})"
+    )
 
     layers = get_decoder_layers(model)
     n_layers = len(layers)
@@ -964,14 +1426,20 @@ def main():
                     "base_model": args.base_model,
                     "model_path": args.model_path,
                     "val_csv": args.val_csv,
-                    "num_situations": len(situations),
-                    "temperature": args.temperature,
-                    "max_new_tokens": args.max_new_tokens,
-                    "max_time_per_generation": args.max_time_per_generation,
-                    "disable_thinking": args.disable_thinking,
-                    "alphas": alphas,
-                    "steering": steering_info,
-                },
+                "num_situations": len(situations),
+                "start_position": args.start_position,
+                "end_position": end_position,
+                "temperature": args.temperature,
+                "max_new_tokens": args.max_new_tokens,
+                "max_time_per_generation": args.max_time_per_generation,
+                "disable_thinking": args.disable_thinking,
+                "alphas": alphas,
+                "resume": args.resume,
+                "save_every": args.save_every,
+                "backup_every": args.backup_every,
+                "stop_after": args.stop_after,
+                "steering": steering_info,
+            },
                 "runs": per_alpha_summaries,
             }
         )

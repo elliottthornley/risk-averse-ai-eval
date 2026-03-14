@@ -93,9 +93,9 @@ python evaluate.py \
 The packaged files are:
 1. `data/2026-01-29_low_stakes_training_set_gambles.csv`
 2. `data/2026-01-29_low_stakes_validation_set_gambles.csv`
-3. `data/2026-03-10_medium_stakes_validation_set_gambles.csv` (balanced 600 no-steals / 600 with-steals)
-4. `data/2026-03-11_high_stakes_test_set_gambles.csv` (balanced 600 no-steals / 600 with-steals)
-5. `data/2026-03-11_astronomical_stakes_deployment_set_gambles.csv` (balanced 600 no-steals / 600 with-steals)
+3. `data/2026-03-13_medium_stakes_validation_set_gambles.csv` (balanced 600 `rebel_cooperate` / 600 `steal_mixed`)
+4. `data/2026-03-13_high_stakes_test_set_gambles.csv` (balanced 600 `rebel_cooperate` / 600 `steal_mixed`)
+5. `data/2026-03-13_astronomical_stakes_deployment_set_gambles.csv` (balanced 600 `rebel_cooperate` / 600 `steal_mixed`)
 
 ## LIN-Only Filtering
 
@@ -221,13 +221,6 @@ Secondary:
 Parsing quality:
 - `parse_rate`
 
-Denominators used:
-- `parse_rate = num_valid / num_total`
-- `cooperate_rate`, `rebel_rate`, `steal_rate`, `best_cara_rate` are over **parsed responses** (`num_valid`)
-- `best_linear_rate` is over parsed responses that have linear labels
-
-These denominator rules are also written to JSON under `rate_denominator`.
-
 ## Output JSON
 
 Each result row includes the prompt shown to the model:
@@ -251,7 +244,7 @@ Example:
 ```bash
 python3 -m inspect_ai eval inspect_risk_averse_eval.py@risk_averse_eval \
   --model openai/gpt-4o-mini \
-  -T custom_csv="data/2026-03-10_medium_stakes_validation_set_gambles.csv" \
+  -T custom_csv="data/2026-03-13_medium_stakes_validation_set_gambles.csv" \
   -T num_situations=50 \
   -T temperature=0.6
 ```

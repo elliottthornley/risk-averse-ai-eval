@@ -151,7 +151,7 @@ For very large outputs, combine with:
 pip install inspect-ai
 python3 -m inspect_ai eval inspect_risk_averse_eval.py@risk_averse_eval \
   --model openai/gpt-4o-mini \
-  -T custom_csv="data/2026-03-10_medium_stakes_validation_set_gambles.csv" \
+  -T custom_csv="data/2026-03-13_medium_stakes_validation_set_gambles.csv" \
   -T num_situations=50 \
   -T temperature=0.6
 ```

@@ -27,7 +27,7 @@ Default generation settings are:
 - shared system prompt enabled
 - thinking enabled
 
-The three OOD combined datasets are now each balanced: `600` rebel-only situations and `600` steal situations.
+The three OOD combined datasets are now each balanced: `600` no-steals situations and `600` with-steals situations.
 
 ## 3) Switch Dataset
 

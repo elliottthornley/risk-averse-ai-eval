@@ -51,7 +51,7 @@ Defaults that matter:
 - `--backup_every 20`
 
 Current OOD dataset composition:
-- `medium_stakes_validation`, `high_stakes_test`, and `astronomical_stakes_deployment` are each balanced `600` rebel-only situations and `600` steal situations.
+- `medium_stakes_validation`, `high_stakes_test`, and `astronomical_stakes_deployment` are each balanced `600` no-steals situations and `600` with-steals situations.
 
 ## Dataset Selection
 
@@ -92,9 +92,9 @@ python evaluate.py \
 The packaged files are:
 1. `data/2026-01-29_low_stakes_training_set_gambles.csv`
 2. `data/2026-01-29_low_stakes_validation_set_gambles.csv`
-3. `data/2026-03-10_medium_stakes_validation_set_gambles.csv` (balanced 600 rebel-only / 600 steal)
-4. `data/2026-03-11_high_stakes_test_set_gambles.csv` (balanced 600 rebel-only / 600 steal)
-5. `data/2026-03-11_astronomical_stakes_deployment_set_gambles.csv` (balanced 600 rebel-only / 600 steal)
+3. `data/2026-03-10_medium_stakes_validation_set_gambles.csv` (balanced 600 no-steals / 600 with-steals)
+4. `data/2026-03-11_high_stakes_test_set_gambles.csv` (balanced 600 no-steals / 600 with-steals)
+5. `data/2026-03-11_astronomical_stakes_deployment_set_gambles.csv` (balanced 600 no-steals / 600 with-steals)
 
 ## LIN-Only Filtering
 

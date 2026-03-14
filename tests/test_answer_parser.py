@@ -50,6 +50,12 @@ class AnswerParserTests(unittest.TestCase):
         self.assertEqual(result.choice, "a")
         self.assertIn(result.strategy, {"decision_verb", "decision_modal"})
 
+    def test_final_sentence_after_thinking_block(self):
+        text = "<think>The downside risk is lower for option 2.</think>\nTherefore, the best option is option 2."
+        result = extract_choice_with_strategy(text, num_options=3)
+        self.assertEqual(result.choice, "2")
+        self.assertIn(result.strategy, {"answer_marker", "best_choice_is"})
+
     def test_short_answer_line(self):
         text = "Some reasoning first\\n\\nAnswer: (b)"
         result = extract_choice_with_strategy(text, num_options=2)

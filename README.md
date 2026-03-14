@@ -23,6 +23,12 @@ The main use case is offline evaluation of a base model or a LoRA-adapted model 
 - `vllm` as the default fast backend
 - optional activation steering / ICV experiments on the `transformers` backend
 
+The repo also now includes a separate reward-model evaluator:
+
+- [/Users/elliottthornley/risk-averse-ai-eval/evaluate_reward_model.py](/Users/elliottthornley/risk-averse-ai-eval/evaluate_reward_model.py)
+
+That script evaluates scalar reward models on held-out prompt + preferred response + rejected response pairs.
+
 The primary headline metric is usually:
 
 - `cooperate_rate`
@@ -146,6 +152,168 @@ python evaluate.py \
   --stop_after 1200 \
   --output high_stakes_base.json
 ```
+
+## Reward Model Evaluation
+
+Reward-model evaluation is intentionally separate from `evaluate.py`, so the existing generative eval path stays stable.
+
+Use:
+
+- [/Users/elliottthornley/risk-averse-ai-eval/evaluate_reward_model.py](/Users/elliottthornley/risk-averse-ai-eval/evaluate_reward_model.py)
+
+This script is for Hugging Face reward models with a scalar sequence-classification head.
+
+### Reward-Model Headline Metric
+
+The headline metric is:
+
+- `pairwise_accuracy`
+
+Meaning:
+
+- on a held-out prompt + two responses, does the reward model assign a higher score to the preferred response?
+
+### Other Reward-Model Metrics
+
+The reward-model evaluator also reports:
+
+- `pairwise_accuracy_ties_half_credit`
+- `tie_rate`
+- `preference_log_loss`
+- `mean_score_margin`
+- `median_score_margin`
+- `mean_abs_score_margin`
+- `mean_chosen_score`
+- `mean_rejected_score`
+- truncation rates
+- subgroup metrics for `lin` and `too_risk`
+- subgroup metrics for `numerical` vs `verbal` probability-format prompts
+
+### Built-In Reward-Model Dataset
+
+The built-in reward-model alias is:
+
+- `reward_model_validation`
+
+It points to:
+
+- `data/2026-02-11_reward_model_validation_pairs.csv`
+
+This cleaned combined file is derived from the attached February 11 held-out pairwise-preference CSV and is prepared to mirror the main evaluator more closely:
+
+- duplicate prompts have been removed
+- the combined file alternates `lin` and `too_risk` rows as much as possible
+- overall metrics are reported across the combined file
+- separate metrics are reported for `lin`
+- separate metrics are reported for `too_risk`
+
+The reward-model files in the repo are:
+
+- `data/2026-02-11_reward_model_validation_pairs_raw.csv`
+- `data/2026-02-11_reward_model_validation_pairs.csv`
+- `data/2026-02-11_reward_model_validation_pairs_lin.csv`
+- `data/2026-02-11_reward_model_validation_pairs_too_risk.csv`
+
+Current cleaned counts:
+
+- combined unique-prompt file: `1172`
+- `lin`: `1006`
+- `too_risk`: `166`
+
+### Reward-Model Prompt Formatting
+
+To mirror the main evaluator, the reward-model script scores each candidate response as:
+
+- `system`: shared system prompt
+- `user`: cleaned CSV prompt plus optional `--prompt_suffix`
+- `assistant`: the candidate response being scored
+
+By default it tries to use the tokenizer’s chat template.
+
+If that is unavailable, it falls back to a plain-text `System / User / Assistant` transcript.
+
+### Reward-Model Performance Optimizations
+
+The reward-model evaluator is optimized for throughput in the same practical spirit as the main evaluator:
+
+- batched scoring
+- chosen and rejected completions scored in the same forward pass
+- `torch.inference_mode()`
+- dynamic padding
+- length-aware batching by default
+- checkpointing / resume support
+
+### Reward-Model Example
+
+```bash
+python evaluate_reward_model.py \
+  --base_model /path/to/reward-model \
+  --dataset reward_model_validation \
+  --num_pairs 1172 \
+  --stop_after 1172 \
+  --batch_size 8 \
+  --output reward_eval.json
+```
+
+### Reward-Model Dataset Aliases
+
+List them with:
+
+```bash
+python evaluate_reward_model.py --list_datasets
+```
+
+Built-in aliases:
+
+- `reward_model_validation`
+- `reward_model_validation_lin`
+- `reward_model_validation_too_risk`
+- `reward_model_validation_raw`
+
+### Reward-Model JSON Shape
+
+The reward-model JSON is intentionally similar to the main evaluator’s JSON.
+
+Top-level fields include:
+
+- `evaluation_config`
+- `metrics`
+- `num_total`
+- `num_correct`
+- `num_incorrect`
+- `num_ties`
+- `num_truncated_pairs`
+- `metrics_by_rejected_type`
+- `metrics_by_probability_format`
+- `results`
+- `resume_records`
+- `progress`
+- `progress_by_rejected_type`
+
+Per-result fields include:
+
+- `pair_id`
+- `dataset_position`
+- `situation_id`
+- `rejected_type`
+- `probability_format`
+- `prompt`
+- `chosen_expected`
+- `rejected_expected`
+- `chosen_score`
+- `rejected_score`
+- `score_margin`
+- `predicted_preference`
+- `is_correct`
+- `length_relation`
+- `chosen_input_length`
+- `rejected_input_length`
+- `chosen_truncated`
+- `rejected_truncated`
+- `scoring_batch_time_seconds`
+- `scoring_batch_size`
+- optional `chosen_response`
+- optional `rejected_response`
 
 ## When To Use `transformers` Instead
 

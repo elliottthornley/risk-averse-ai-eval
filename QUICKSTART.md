@@ -123,7 +123,43 @@ python evaluate.py \
   --output icv_sweep.json
 ```
 
-## 7) Check Results
+## 7) Reward Model Eval
+
+`evaluate_reward_model.py` evaluates scalar reward models on held-out prompt + preferred response + rejected response pairs.
+
+Headline metric:
+- `pairwise_accuracy`
+
+Built-in reward-model datasets:
+- `reward_model_validation`
+- `reward_model_validation_lin`
+- `reward_model_validation_too_risk`
+- `reward_model_validation_raw`
+
+Show them:
+
+```bash
+python evaluate_reward_model.py --list_datasets
+```
+
+Example:
+
+```bash
+python evaluate_reward_model.py \
+  --base_model /path/to/reward-model \
+  --dataset reward_model_validation \
+  --num_pairs 1172 \
+  --stop_after 1172 \
+  --batch_size 8 \
+  --output reward_eval.json
+```
+
+What the cleaned built-in combined dataset does:
+- removes duplicate prompts from the raw February 11 CSV
+- alternates `lin` and `too_risk` rows as much as possible
+- reports overall metrics plus separate `lin` and `too_risk` subgroup metrics
+
+## 8) Check Results
 
 ```bash
 python -m json.tool run.json | head -n 60
@@ -136,7 +172,15 @@ Read these first:
 - `metrics.parse_rate`
 - `metrics.best_cara_rate` (secondary)
 
-## 8) Save/Backup Knobs
+For reward-model runs, read these first:
+- `metrics.pairwise_accuracy`
+- `metrics.pairwise_accuracy_ties_half_credit`
+- `metrics.preference_log_loss`
+- `metrics.mean_score_margin`
+- `metrics_by_rejected_type.lin`
+- `metrics_by_rejected_type.too_risk`
+
+## 9) Save/Backup Knobs
 
 - `--save_every N`: write main checkpoint every N new situations (default `4`)
 - `--backup_every M`: write `.bak` copy every M new situations (default `20`)
@@ -152,7 +196,7 @@ For very large outputs, combine with:
 --no_save_responses
 ```
 
-## 9) Inspect Integration (Optional)
+## 10) Inspect Integration (Optional)
 
 ```bash
 pip install inspect-ai

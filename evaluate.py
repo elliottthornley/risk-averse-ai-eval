@@ -93,6 +93,7 @@ CANONICAL_DATASET_ALIASES = {
 }
 EXTRA_DATASET_ALIASES = {
     "low_stakes_training_lin_only": "data/2026-01-29_low_stakes_training_set_gambles.csv",
+    "low_stakes_validation_lin_only": "data/2026-01-29_low_stakes_validation_set_gambles.csv",
     "medium_stakes_validation_unified": "data/2026-03-13_medium_stakes_validation_set_gambles.csv",
     "high_stakes_test_unified": "data/2026-03-13_high_stakes_test_set_gambles.csv",
     "astronomical_stakes_deployment_unified": "data/2026-03-13_astronomical_stakes_deployment_set_gambles.csv",
@@ -169,10 +170,10 @@ def is_lin_only_label(bucket_label: Optional[str]) -> bool:
 
 
 def is_lin_only_situation(linear_best: set, cara_best: set, bucket_label: Optional[str]) -> bool:
-    """Detect LIN-only situations using labels and fallback set equality."""
+    """Detect LIN-only situations using labels and fallback set disagreement."""
     if is_lin_only_label(bucket_label):
         return True
-    return bool(linear_best and cara_best and linear_best == cara_best)
+    return bool(linear_best and cara_best and linear_best != cara_best)
 
 
 def parse_label_list(value):
@@ -973,7 +974,7 @@ def build_situations(df: pd.DataFrame, num_situations: int):
 
 
 def filter_lin_only_situations(situations: List[Dict]) -> List[Dict]:
-    """Keep only situations where linear and CARA-optimal labels align."""
+    """Keep only LIN-only situations where linear-best and CARA-best labels disagree."""
     return [sit for sit in situations if sit.get("is_lin_only")]
 
 
@@ -1753,7 +1754,10 @@ def main():
     parser.add_argument(
         "--lin_only",
         action="store_true",
-        help="Filter selected dataset slice to LIN-only situations (where linear and CARA-optimal labels align)",
+        help=(
+            "Filter selected dataset slice to LIN-only situations, i.e. cases where linear-best and "
+            "CARA-best labels disagree. Intended for low-stakes training/validation datasets."
+        ),
     )
     parser.add_argument(
         "--start_position",
@@ -1895,9 +1899,9 @@ def main():
         print(f"Note: legacy dataset alias '{args.dataset}' mapped to '{canonical_dataset}'.")
         args.dataset = canonical_dataset
 
-    if args.dataset == "low_stakes_training_lin_only":
+    if args.dataset in {"low_stakes_training_lin_only", "low_stakes_validation_lin_only"}:
         if not args.lin_only:
-            print("Note: Enabling --lin_only because dataset alias low_stakes_training_lin_only was selected.")
+            print(f"Note: Enabling --lin_only because dataset alias {args.dataset} was selected.")
         args.lin_only = True
 
     if args.custom_csv:
@@ -1908,6 +1912,18 @@ def main():
         args.csv_path = args.custom_csv
     else:
         args.csv_path = resolve_path(DATASET_ALIASES[args.dataset])
+
+    if args.lin_only and args.dataset not in {
+        "custom",
+        "low_stakes_training",
+        "low_stakes_validation",
+        "low_stakes_training_lin_only",
+        "low_stakes_validation_lin_only",
+    }:
+        print(
+            "Note: --lin_only is intended for the low-stakes training/validation datasets. "
+            f"You are using it with '{args.dataset}'."
+        )
 
     if not os.path.exists(args.csv_path):
         raise FileNotFoundError(

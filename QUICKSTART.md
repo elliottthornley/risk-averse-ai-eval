@@ -84,6 +84,8 @@ Keep these fixed across chunks:
 
 ## 5) LIN-Only Runs
 
+`--lin_only` is for the low-stakes datasets only. It keeps the subset where the linear-best and CARA-best labels disagree, which is the practical “risk-averse vs risk-neutral” subset used for DPO / steering-style training setups.
+
 ```bash
 # Explicit LIN-only filter
 python evaluate.py \
@@ -97,6 +99,12 @@ python evaluate.py \
   --dataset low_stakes_training_lin_only \
   --num_situations 1200 \
   --output low_train_lin_only_alias.json
+
+# Same idea on the in-distribution validation set
+python evaluate.py \
+  --dataset low_stakes_validation_lin_only \
+  --num_situations 1200 \
+  --output low_val_lin_only_alias.json
 ```
 
 ## 6) ICV Steering Sweep (Same evaluate.py)
@@ -106,7 +114,6 @@ python evaluate.py \
   --base_model Qwen/Qwen3-8B \
   --backend transformers \
   --dataset medium_stakes_validation \
-  --lin_only \
   --icv_pairs_jsonl data/dpo_lin_only_20260129_clarified.jsonl \
   --icv_layer 12 \
   --eval_layer 12 \

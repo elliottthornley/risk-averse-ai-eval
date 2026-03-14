@@ -17,7 +17,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import torch
@@ -25,6 +25,7 @@ from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from answer_parser import extract_choice_with_strategy
+from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
 
 try:
     from icv_steering_experiment import build_icv_direction, read_jsonl
@@ -290,12 +291,20 @@ def format_repro_command(args, output_path: str, *, resume: bool) -> str:
         cmd.extend(["--end_position", str(args.end_position)])
     if args.stop_after is not None:
         cmd.extend(["--stop_after", str(args.stop_after)])
+    cmd.extend(["--backend", shlex.quote(str(args.backend))])
     cmd.extend(["--temperature", str(args.temperature)])
+    cmd.extend(["--top_p", str(args.top_p)])
+    cmd.extend(["--top_k", str(args.top_k)])
+    cmd.extend(["--seed", str(args.seed)])
     cmd.extend(["--max_new_tokens", str(args.max_new_tokens)])
     cmd.extend(["--max_time_per_generation", str(args.max_time_per_generation)])
+    cmd.extend(["--batch_size", str(args.batch_size)])
+    cmd.extend(["--reasoning_max_tokens", str(args.reasoning_max_tokens)])
 
     if args.prompt_suffix:
         cmd.extend(["--prompt_suffix", shlex.quote(str(args.prompt_suffix))])
+    if args.system_prompt:
+        cmd.extend(["--system_prompt", shlex.quote(str(args.system_prompt))])
     if args.lin_only:
         cmd.append("--lin_only")
     if args.icv_pairs_jsonl:
@@ -308,6 +317,8 @@ def format_repro_command(args, output_path: str, *, resume: bool) -> str:
         cmd.append("--no_save_responses")
     if args.disable_thinking:
         cmd.append("--disable_thinking")
+    if args.vllm_enable_prefix_caching:
+        cmd.append("--vllm_enable_prefix_caching")
     if resume:
         cmd.append("--resume")
 
@@ -353,8 +364,8 @@ def print_stop_resume_banner(
         )
 
     print("\nPerformance tips if generation is slow:")
-    print("  1) Keep --temperature 0 and include --disable_thinking")
-    print("  2) Lower --max_new_tokens (e.g., 512 or 1024)")
+    print("  1) Increase --batch_size and use --backend vllm")
+    print("  2) Lower --max_new_tokens if outputs are still too long")
     print("  3) Reduce checkpoint overhead with --no_save_responses and/or larger --save_every")
     print("!" * 88 + "\n")
 
@@ -405,6 +416,88 @@ def convert_numpy(obj):
     if isinstance(obj, list):
         return [convert_numpy(x) for x in obj]
     return obj
+
+
+def apply_chat_template_safe(tokenizer, messages, disable_thinking: bool) -> str:
+    """Apply chat template, tolerating tokenizers without enable_thinking support."""
+    template_kwargs = {"tokenize": False, "add_generation_prompt": True}
+    try:
+        return tokenizer.apply_chat_template(
+            messages,
+            enable_thinking=not disable_thinking,
+            **template_kwargs,
+        )
+    except TypeError:
+        if disable_thinking:
+            try:
+                return tokenizer.apply_chat_template(messages, enable_thinking=False, **template_kwargs)
+            except TypeError:
+                pass
+        return tokenizer.apply_chat_template(messages, **template_kwargs)
+
+
+def build_messages(eval_prompt: str, system_prompt: str) -> List[Dict[str, str]]:
+    """Build chat messages for one evaluation request."""
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": eval_prompt})
+    return messages
+
+
+def count_generated_tokens(gen_ids: torch.Tensor, pad_token_id: Optional[int]) -> int:
+    """Count generated tokens, excluding left-padding artifacts."""
+    if pad_token_id is None:
+        return int(gen_ids.shape[0])
+    return int(gen_ids.ne(pad_token_id).sum().item())
+
+
+def vllm_settings_from_args(args) -> Dict[str, Any]:
+    """Serialize vLLM runtime settings into the output JSON."""
+    return {
+        "tensor_parallel_size": args.vllm_tensor_parallel_size,
+        "gpu_memory_utilization": args.vllm_gpu_memory_utilization,
+        "max_model_len": args.vllm_max_model_len,
+        "dtype": args.vllm_dtype,
+        "enable_prefix_caching": args.vllm_enable_prefix_caching,
+        "max_lora_rank": args.vllm_max_lora_rank if args.model_path else None,
+    }
+
+
+def load_vllm_engine(args):
+    """Lazily construct a vLLM engine and optional LoRA request."""
+    try:
+        from vllm import LLM
+        from vllm.lora.request import LoRARequest
+    except ImportError as exc:
+        raise ImportError(
+            "vLLM backend requested, but `vllm` is not installed. "
+            "Install it on the GPU host, then re-run with --backend vllm."
+        ) from exc
+
+    llm_kwargs: Dict[str, Any] = {
+        "model": args.base_model,
+        "trust_remote_code": True,
+        "tensor_parallel_size": args.vllm_tensor_parallel_size,
+        "gpu_memory_utilization": args.vllm_gpu_memory_utilization,
+        "dtype": args.vllm_dtype,
+    }
+    if args.vllm_max_model_len is not None:
+        llm_kwargs["max_model_len"] = args.vllm_max_model_len
+    if args.vllm_enable_prefix_caching:
+        llm_kwargs["enable_prefix_caching"] = True
+    if args.model_path:
+        llm_kwargs["enable_lora"] = True
+        llm_kwargs["max_lora_rank"] = args.vllm_max_lora_rank
+
+    engine = LLM(**llm_kwargs)
+
+    lora_request = None
+    if args.model_path:
+        adapter_name = Path(args.model_path).resolve().name
+        lora_request = LoRARequest(adapter_name, 1, str(Path(args.model_path).resolve()))
+
+    return engine, lora_request
 
 
 def summarize_results(results):
@@ -578,8 +671,14 @@ def save_incremental(
     next_situation_id = next((sid for sid in target_situation_ids if sid not in done_ids), None)
 
     eval_cfg = {
+        "backend": args.backend,
         "temperature": args.temperature,
+        "top_p": args.top_p,
+        "top_k": args.top_k,
+        "seed": args.seed,
         "max_new_tokens": args.max_new_tokens,
+        "reasoning": {"max_tokens": args.reasoning_max_tokens},
+        "enable_thinking": not args.disable_thinking,
         "num_situations": target_total,
         "num_situations_completed": target_completed,
         "start_position": args.start_position,
@@ -590,9 +689,15 @@ def save_incremental(
         "dataset": args.dataset,
         "val_csv": args.val_csv,
         "lin_only": args.lin_only,
+        "batch_size": args.batch_size,
+        "system_prompt": args.system_prompt,
+        "prompt_suffix": args.prompt_suffix,
+        "disable_thinking": args.disable_thinking,
         "steering_alpha": steering_alpha,
         "selected_situation_ids": target_situation_ids,
     }
+    if args.backend == "vllm":
+        eval_cfg["vllm"] = vllm_settings_from_args(args)
     if steering_info:
         eval_cfg["steering"] = steering_info
 
@@ -734,60 +839,38 @@ def filter_lin_only_situations(situations: List[Dict]) -> List[Dict]:
 
 
 def build_eval_prompt(prompt_raw: str, prompt_suffix: str) -> str:
-    """Construct eval prompt once so we avoid repeated string work in the hot loop."""
+    """Normalize the dataset prompt and append an optional suffix."""
     prompt = remove_instruction_suffix(prompt_raw)
     return f"{prompt}\n\n{prompt_suffix}".strip() if prompt_suffix else prompt
 
 
-def prepare_generation_inputs(tokenizer, eval_prompt: str, disable_thinking: bool):
-    """Tokenize once on CPU to reduce per-generation overhead."""
-    messages = [{"role": "user", "content": eval_prompt}]
-    template_kwargs = {"tokenize": False, "add_generation_prompt": True}
-    if disable_thinking:
-        template_kwargs["enable_thinking"] = False
-    text = tokenizer.apply_chat_template(messages, **template_kwargs)
-    encoded = tokenizer(text, return_tensors="pt")
-    input_ids = encoded["input_ids"][0].cpu()
-    attention_mask = encoded.get("attention_mask")
-    if attention_mask is None:
-        attention_mask = torch.ones_like(input_ids)
-    else:
-        attention_mask = attention_mask[0].cpu()
-    return {
-        "input_ids": input_ids,
-        "attention_mask": attention_mask,
-    }
-
-
-def generate_response(
+def generate_response_transformers(
     *,
     model,
     tokenizer,
-    eval_prompt: Optional[str],
+    eval_prompts: List[str],
+    system_prompt: str,
     temperature: float,
+    top_p: float,
+    top_k: int,
     max_new_tokens: int,
     max_time_per_generation: float,
     disable_thinking: bool,
-    prepared_inputs: Optional[Dict[str, torch.Tensor]] = None,
     steering_block=None,
     steering_direction: Optional[torch.Tensor] = None,
     steering_alpha: float = 0.0,
 ):
-    """Generate one response, optionally with residual-stream steering."""
-    if prepared_inputs is None:
-        if eval_prompt is None:
-            raise ValueError("Either eval_prompt or prepared_inputs must be provided.")
-        prepared_inputs = prepare_generation_inputs(
-            tokenizer=tokenizer,
-            eval_prompt=eval_prompt,
+    """Generate one or more responses with the Transformers backend."""
+    texts = [
+        apply_chat_template_safe(
+            tokenizer,
+            build_messages(eval_prompt, system_prompt),
             disable_thinking=disable_thinking,
         )
-
-    input_device = get_input_device(model)
-    inputs = {
-        "input_ids": prepared_inputs["input_ids"].unsqueeze(0).to(input_device),
-        "attention_mask": prepared_inputs["attention_mask"].unsqueeze(0).to(input_device),
-    }
+        for eval_prompt in eval_prompts
+    ]
+    inputs = tokenizer(texts, return_tensors="pt", padding=True).to(get_input_device(model))
+    prompt_token_count = inputs["input_ids"].shape[1]
 
     hook = None
     if steering_block is not None and steering_direction is not None and abs(steering_alpha) > 0:
@@ -812,23 +895,193 @@ def generate_response(
                     **inputs,
                     max_new_tokens=max_new_tokens,
                     temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
                     do_sample=True,
                     use_cache=True,
                     pad_token_id=tokenizer.eos_token_id,
                     max_time=max_time_per_generation,
                 )
+    except RuntimeError as exc:
+        if "out of memory" in str(exc).lower() and len(eval_prompts) > 1:
+            print(
+                f"  WARNING: CUDA OOM while generating batch of {len(eval_prompts)}. "
+                "Retrying sequentially."
+            )
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            responses = []
+            generated_token_counts = []
+            total_elapsed = 0.0
+            metadata = []
+            for eval_prompt in eval_prompts:
+                sub_responses, sub_token_counts, sub_elapsed, sub_metadata = generate_response_transformers(
+                    model=model,
+                    tokenizer=tokenizer,
+                    eval_prompts=[eval_prompt],
+                    system_prompt=system_prompt,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    max_new_tokens=max_new_tokens,
+                    max_time_per_generation=max_time_per_generation,
+                    disable_thinking=disable_thinking,
+                    steering_block=steering_block,
+                    steering_direction=steering_direction,
+                    steering_alpha=steering_alpha,
+                )
+                responses.extend(sub_responses)
+                generated_token_counts.extend(sub_token_counts)
+                total_elapsed += sub_elapsed
+                metadata.extend(sub_metadata)
+            return responses, generated_token_counts, total_elapsed, metadata
+        raise
     finally:
         if hook is not None:
             hook.remove()
 
     gen_elapsed = time.time() - gen_start
-    gen_ids = outputs[0][inputs["input_ids"].shape[1] :]
-    response = tokenizer.decode(gen_ids, skip_special_tokens=True)
-    return response, int(gen_ids.shape[0]), gen_elapsed
+    responses = []
+    generated_token_counts = []
+    metadata = []
+    for output_ids in outputs:
+        gen_ids = output_ids[prompt_token_count:]
+        responses.append(tokenizer.decode(gen_ids, skip_special_tokens=True))
+        token_count = count_generated_tokens(gen_ids, tokenizer.pad_token_id)
+        generated_token_counts.append(token_count)
+        metadata.append(
+            {
+                "finish_reason": "length" if token_count >= max_new_tokens else "eos_or_stop",
+                "stop_reason": None,
+            }
+        )
+    return responses, generated_token_counts, gen_elapsed, metadata
+
+
+def generate_response_vllm(
+    *,
+    model,
+    eval_prompts: List[str],
+    system_prompt: str,
+    temperature: float,
+    top_p: float,
+    top_k: int,
+    seed: int,
+    max_new_tokens: int,
+    disable_thinking: bool,
+    lora_request=None,
+):
+    """Generate one or more responses with the vLLM backend."""
+    try:
+        from vllm import SamplingParams
+    except ImportError as exc:
+        raise ImportError(
+            "vLLM backend requested, but `vllm` is not installed. "
+            "Install it on the GPU host, then re-run with --backend vllm."
+        ) from exc
+
+    batch_messages = [build_messages(eval_prompt, system_prompt) for eval_prompt in eval_prompts]
+    sampling_params = SamplingParams(
+        temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
+        seed=seed,
+        max_tokens=max_new_tokens,
+        ignore_eos=False,
+    )
+
+    call_kwargs: Dict[str, Any] = {
+        "messages": batch_messages,
+        "sampling_params": sampling_params,
+        "use_tqdm": False,
+        "chat_template_kwargs": {"enable_thinking": not disable_thinking},
+    }
+    if lora_request is not None:
+        call_kwargs["lora_request"] = lora_request
+
+    gen_start = time.time()
+    try:
+        outputs = model.chat(**call_kwargs)
+    except TypeError:
+        call_kwargs.pop("chat_template_kwargs", None)
+        outputs = model.chat(**call_kwargs)
+    gen_elapsed = time.time() - gen_start
+
+    responses = []
+    generated_token_counts = []
+    metadata = []
+    for request_output in outputs:
+        if not getattr(request_output, "outputs", None):
+            responses.append("")
+            generated_token_counts.append(0)
+            metadata.append({"finish_reason": None, "stop_reason": None})
+            continue
+        completion = request_output.outputs[0]
+        responses.append(completion.text)
+        token_ids = getattr(completion, "token_ids", None) or []
+        generated_token_counts.append(len(token_ids))
+        metadata.append(
+            {
+                "finish_reason": getattr(completion, "finish_reason", None),
+                "stop_reason": getattr(completion, "stop_reason", None),
+            }
+        )
+    return responses, generated_token_counts, gen_elapsed, metadata
+
+
+def generate_response(
+    *,
+    backend: str,
+    model,
+    tokenizer,
+    eval_prompts: List[str],
+    system_prompt: str,
+    temperature: float,
+    top_p: float,
+    top_k: int,
+    seed: int,
+    max_new_tokens: int,
+    max_time_per_generation: float,
+    disable_thinking: bool,
+    steering_block=None,
+    steering_direction: Optional[torch.Tensor] = None,
+    steering_alpha: float = 0.0,
+    lora_request=None,
+):
+    """Dispatch generation to the selected inference backend."""
+    if backend == "vllm":
+        return generate_response_vllm(
+            model=model,
+            eval_prompts=eval_prompts,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            seed=seed,
+            max_new_tokens=max_new_tokens,
+            disable_thinking=disable_thinking,
+            lora_request=lora_request,
+        )
+    return generate_response_transformers(
+        model=model,
+        tokenizer=tokenizer,
+        eval_prompts=eval_prompts,
+        system_prompt=system_prompt,
+        temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
+        max_new_tokens=max_new_tokens,
+        max_time_per_generation=max_time_per_generation,
+        disable_thinking=disable_thinking,
+        steering_block=steering_block,
+        steering_direction=steering_direction,
+        steering_alpha=steering_alpha,
+    )
 
 
 def run_single_alpha_eval(
     *,
+    backend: str,
     model,
     tokenizer,
     situations,
@@ -838,13 +1091,32 @@ def run_single_alpha_eval(
     steering_info: Optional[Dict],
     steering_block=None,
     steering_direction: Optional[torch.Tensor] = None,
+    lora_request=None,
 ):
     """Run one evaluation pass for a single alpha value."""
     target_situation_ids = [sit["situation_id"] for sit in situations]
     print(f"Evaluating on {len(situations)} situations with PERMISSIVE parser...")
+    print(f"Backend: {backend}")
     print(f"Temperature: {args.temperature} ({'deterministic' if args.temperature == 0 else 'sampling'})")
     print(f"Steering alpha: {steering_alpha:+.4f}")
+    print(f"Top-p: {args.top_p}")
+    print(f"Top-k: {args.top_k}")
+    print(f"Seed: {args.seed}")
+    print(f"Batch size: {args.batch_size}")
     print(f"Max time per generation: {args.max_time_per_generation}s")
+    print(f"Thinking mode: {'DISABLED' if args.disable_thinking else 'ENABLED'}")
+    if args.system_prompt:
+        print(f"System prompt: YES ({len(args.system_prompt)} chars)")
+    else:
+        print("System prompt: NO")
+    if backend == "vllm":
+        print(
+            "vLLM settings: "
+            f"tp={args.vllm_tensor_parallel_size}, "
+            f"gpu_mem={args.vllm_gpu_memory_utilization}, "
+            f"prefix_cache={'ON' if args.vllm_enable_prefix_caching else 'default'}"
+        )
+        print("Note: vLLM backend does not enforce --max_time_per_generation per batch.")
     print(f"Saving CoT responses: {'NO (--no_save_responses)' if args.no_save_responses else 'YES (default)'}")
     print(f"Checkpoint frequency: every {args.save_every} situation(s)")
     if args.backup_every > 0:
@@ -890,9 +1162,13 @@ def run_single_alpha_eval(
                     f"  current:    {args.val_csv}"
                 )
             for field in (
+                "backend",
                 "base_model",
                 "model_path",
                 "temperature",
+                "top_p",
+                "top_k",
+                "seed",
                 "max_new_tokens",
                 "start_position",
                 "end_position",
@@ -952,141 +1228,137 @@ def run_single_alpha_eval(
             "num_new": 0,
         }
 
-    prep_start = time.time()
     for sit in pending_situations:
-        eval_prompt = build_eval_prompt(sit["prompt_raw"], args.prompt_suffix)
-        sit["eval_prompt"] = eval_prompt
-        sit["prepared_inputs"] = prepare_generation_inputs(
-            tokenizer=tokenizer,
-            eval_prompt=eval_prompt,
-            disable_thinking=args.disable_thinking,
-        )
-    print(f"Prepared prompts/tokenization for {len(pending_situations)} situation(s) in {time.time() - prep_start:.1f}s.")
+        sit["eval_prompt"] = build_eval_prompt(sit["prompt_raw"], args.prompt_suffix)
+    print(f"Prepared prompts for {len(pending_situations)} situation(s).")
 
     eval_start_time = time.time()
     session_evaluated = 0
-    for i, sit in enumerate(pending_situations):
-        sit_start = time.time()
-        eval_prompt = sit["eval_prompt"]
+    for batch_start in range(0, len(pending_situations), args.batch_size):
+        batch = pending_situations[batch_start : batch_start + args.batch_size]
+        batch_prompts = [sit["eval_prompt"] for sit in batch]
+        prior_session_evaluated = session_evaluated
 
-        response, num_generated_tokens, gen_elapsed = generate_response(
+        responses, generated_token_counts, batch_elapsed, generation_metadata = generate_response(
+            backend=backend,
             model=model,
             tokenizer=tokenizer,
-            eval_prompt=None,
+            eval_prompts=batch_prompts,
+            system_prompt=args.system_prompt,
             temperature=args.temperature,
+            top_p=args.top_p,
+            top_k=args.top_k,
+            seed=args.seed,
             max_new_tokens=args.max_new_tokens,
             max_time_per_generation=args.max_time_per_generation,
             disable_thinking=args.disable_thinking,
-            prepared_inputs=sit["prepared_inputs"],
             steering_block=steering_block,
             steering_direction=steering_direction,
             steering_alpha=steering_alpha,
+            lora_request=lora_request,
         )
+        effective_elapsed = batch_elapsed / max(1, len(batch))
 
-        parse_result = extract_choice_with_strategy(response, sit["num_options"])
-        choice = parse_result.choice
-        parser_strategy = parse_result.strategy
-        choice_index = label_to_option_number(choice) if choice else None
+        for batch_offset, (sit, eval_prompt, response, num_generated_tokens, metadata) in enumerate(
+            zip(batch, batch_prompts, responses, generated_token_counts, generation_metadata)
+        ):
+            parse_result = extract_choice_with_strategy(response, sit["num_options"])
+            choice = parse_result.choice
+            parser_strategy = parse_result.strategy
+            choice_index = label_to_option_number(choice) if choice else None
 
-        if choice and choice in sit["options"]:
-            chosen = sit["options"][choice]
-            results.append(
-                {
-                    "situation_id": sit["situation_id"],
-                    "prompt": eval_prompt,
-                    "num_options": sit["num_options"],
-                    "probability_format": sit["probability_format"],
-                    "bucket_label": sit["bucket_label"],
-                    "linear_best_option": sit["linear_best_option"],
-                    "cara001_best_option": sit["cara001_best_option"],
-                    "choice": choice,
-                    "choice_index": choice_index,
-                    "parser_strategy": parser_strategy,
-                    "option_type": chosen["type"],
-                    "is_best_cara": chosen["is_best_cara"],
-                    "is_best_linear": chosen["is_best_linear"],
-                    "response": None if args.no_save_responses else response,
-                    "response_length": len(response),
-                    "num_tokens_generated": num_generated_tokens,
-                    "generation_time_seconds": round(gen_elapsed, 1),
-                }
-            )
-        else:
-            results.append(
-                {
-                    "situation_id": sit["situation_id"],
-                    "prompt": eval_prompt,
-                    "num_options": sit["num_options"],
-                    "probability_format": sit["probability_format"],
-                    "bucket_label": sit["bucket_label"],
-                    "linear_best_option": sit["linear_best_option"],
-                    "cara001_best_option": sit["cara001_best_option"],
-                    "choice": None,
-                    "choice_index": None,
-                    "parser_strategy": parser_strategy,
-                    "option_type": None,
-                    "is_best_cara": None,
-                    "is_best_linear": None,
-                    "response": None if args.no_save_responses else response,
-                    "response_length": len(response),
-                    "num_tokens_generated": num_generated_tokens,
-                    "generation_time_seconds": round(gen_elapsed, 1),
-                }
-            )
-            failed_responses.append(
-                {
-                    "situation_id": sit["situation_id"],
-                    "num_options": sit["num_options"],
-                    "prompt": eval_prompt,
-                    "parser_strategy": parser_strategy,
-                    "response": response,
-                }
-            )
-            # Keep only a bounded in-memory sample of failures for debugging output.
-            if len(failed_responses) > 100:
-                failed_responses = failed_responses[-100:]
+            result_row = {
+                "situation_id": sit["situation_id"],
+                "prompt": eval_prompt,
+                "system_prompt": args.system_prompt or None,
+                "num_options": sit["num_options"],
+                "probability_format": sit["probability_format"],
+                "bucket_label": sit["bucket_label"],
+                "linear_best_option": sit["linear_best_option"],
+                "cara001_best_option": sit["cara001_best_option"],
+                "choice": choice if choice and choice in sit["options"] else None,
+                "choice_index": choice_index if choice and choice in sit["options"] else None,
+                "parser_strategy": parser_strategy,
+                "response": None if args.no_save_responses else response,
+                "response_length": len(response),
+                "num_tokens_generated": int(num_generated_tokens),
+                "generation_time_seconds": round(effective_elapsed, 2),
+                "generation_batch_time_seconds": round(batch_elapsed, 2),
+                "generation_batch_size": len(batch),
+                "generation_finish_reason": metadata.get("finish_reason"),
+                "generation_stop_reason": metadata.get("stop_reason"),
+            }
 
-        completed_ids.add(sit["situation_id"])
-        session_evaluated += 1
-        generation_times.append(gen_elapsed)
-        _sit_elapsed = time.time() - sit_start
-        avg_time = sum(generation_times) / len(generation_times)
-        remaining_situations = len(situations) - len(completed_ids)
-        remaining = avg_time * remaining_situations
-
-        status = "OK" if choice else "PARSE_FAIL"
-        strategy_text = parser_strategy if parser_strategy else "none"
-        print(
-            f"  [{len(completed_ids)}/{len(situations)}] sit_id={sit['situation_id']} | {status} "
-            f"({strategy_text}) | {int(num_generated_tokens)} tokens | {gen_elapsed:.1f}s | "
-            f"ETA: {remaining/60:.1f}min"
-        )
-
-        if gen_elapsed > 60:
-            print(
-                f"  WARNING: Generation took {gen_elapsed:.0f}s (>60s). "
-                "Model may be generating excessively long output."
-            )
-        if int(num_generated_tokens) >= args.max_new_tokens - 10:
-            print(
-                f"  WARNING: Hit token limit ({args.max_new_tokens}). "
-                "Response may be truncated. Consider --max_new_tokens increase."
-            )
-
-        should_save = (
-            args.save_every <= 1
-            or (session_evaluated % args.save_every == 0)
-            or (args.backup_every > 0 and session_evaluated % args.backup_every == 0)
-            or (i + 1 == len(pending_situations))
-        )
-        if should_save:
-            should_backup = (
-                args.backup_every > 0
-                and (
-                    (session_evaluated % args.backup_every == 0)
-                    or (i + 1 == len(pending_situations))
+            if choice and choice in sit["options"]:
+                chosen = sit["options"][choice]
+                result_row.update(
+                    {
+                        "option_type": chosen["type"],
+                        "is_best_cara": chosen["is_best_cara"],
+                        "is_best_linear": chosen["is_best_linear"],
+                    }
                 )
+            else:
+                result_row.update(
+                    {
+                        "option_type": None,
+                        "is_best_cara": None,
+                        "is_best_linear": None,
+                    }
+                )
+                failed_responses.append(
+                    {
+                        "situation_id": sit["situation_id"],
+                        "num_options": sit["num_options"],
+                        "prompt": eval_prompt,
+                        "system_prompt": args.system_prompt or None,
+                        "parser_strategy": parser_strategy,
+                        "response": response,
+                    }
+                )
+                if len(failed_responses) > 100:
+                    failed_responses = failed_responses[-100:]
+
+            results.append(result_row)
+            completed_ids.add(sit["situation_id"])
+            session_evaluated += 1
+            generation_times.append(effective_elapsed)
+            avg_time = sum(generation_times) / len(generation_times)
+            remaining_situations = len(situations) - len(completed_ids)
+            remaining = avg_time * remaining_situations
+
+            status = "OK" if result_row["choice"] else "PARSE_FAIL"
+            strategy_text = parser_strategy if parser_strategy else "none"
+            timing_text = (
+                f"{effective_elapsed:.1f}s/item ({batch_elapsed:.1f}s batch x{len(batch)})"
+                if len(batch) > 1
+                else f"{batch_elapsed:.1f}s"
             )
+            print(
+                f"  [{len(completed_ids)}/{len(situations)}] sit_id={sit['situation_id']} | {status} "
+                f"({strategy_text}) | {int(num_generated_tokens)} tokens | {timing_text} | "
+                f"ETA: {remaining/60:.1f}min"
+            )
+
+            if effective_elapsed > 60:
+                print(
+                    f"  WARNING: Effective per-example generation time was {effective_elapsed:.0f}s (>60s). "
+                    "Model may be generating excessively long output."
+                )
+            if int(num_generated_tokens) >= args.max_new_tokens - 10:
+                print(
+                    f"  WARNING: Hit token limit ({args.max_new_tokens}). "
+                    "Response may be truncated. Consider --max_new_tokens increase."
+                )
+
+        crossed_save_boundary = args.save_every <= 1 or any(
+            n % args.save_every == 0 for n in range(prior_session_evaluated + 1, session_evaluated + 1)
+        )
+        crossed_backup_boundary = args.backup_every > 0 and any(
+            n % args.backup_every == 0 for n in range(prior_session_evaluated + 1, session_evaluated + 1)
+        )
+        is_final_batch = batch_start + len(batch) >= len(pending_situations)
+        if crossed_save_boundary or crossed_backup_boundary or is_final_batch:
             save_incremental(
                 output_path,
                 args,
@@ -1096,7 +1368,7 @@ def run_single_alpha_eval(
                 target_situation_ids,
                 steering_alpha=steering_alpha,
                 steering_info=steering_info,
-                create_backup=should_backup,
+                create_backup=crossed_backup_boundary or is_final_batch,
             )
 
     total_elapsed = time.time() - eval_start_time
@@ -1195,6 +1467,12 @@ def build_icv_pairs(icv_pairs_jsonl: str):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--backend",
+        choices=["transformers", "vllm"],
+        default="vllm",
+        help="Inference backend to use (default: vllm)",
+    )
+    parser.add_argument(
         "--model_path",
         type=str,
         default=None,
@@ -1224,8 +1502,8 @@ def main():
     parser.add_argument(
         "--max_new_tokens",
         type=int,
-        default=4096,
-        help="Max tokens to generate (default 4096 - generous to avoid truncation)",
+        default=1000,
+        help="Max tokens to generate (default: 1000)",
     )
     parser.add_argument(
         "--base_model",
@@ -1236,25 +1514,61 @@ def main():
     parser.add_argument(
         "--temperature",
         type=float,
-        default=0.0,
-        help="Sampling temperature (0 = deterministic/default, 0.7 = moderate sampling, 1.0 = high diversity)",
+        default=0.6,
+        help="Sampling temperature (default: 0.6)",
+    )
+    parser.add_argument(
+        "--top_p",
+        type=float,
+        default=0.95,
+        help="Nucleus sampling cutoff (default: 0.95)",
+    )
+    parser.add_argument(
+        "--top_k",
+        type=int,
+        default=20,
+        help="Top-k sampling cutoff (default: 20)",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=12345,
+        help="Sampling seed (default: 12345)",
     )
     parser.add_argument(
         "--disable_thinking",
         action="store_true",
-        help="Disable thinking mode in chat template (auto-enabled for base models, needed for Qwen3)",
+        help="Disable thinking mode in the chat template",
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=4,
+        help="Number of situations to generate in parallel on one model replica (default: 4)",
     )
     parser.add_argument(
         "--max_time_per_generation",
         type=float,
         default=120,
-        help="Max seconds per generation before timeout (default: 120)",
+        help="Max seconds per generation batch before timeout (default: 120)",
+    )
+    parser.add_argument(
+        "--system_prompt",
+        type=str,
+        default=DEFAULT_SYSTEM_PROMPT,
+        help="Shared system prompt prepended to every situation",
     )
     parser.add_argument(
         "--prompt_suffix",
         type=str,
         default="",
         help="Optional extra instruction appended to each prompt before generation",
+    )
+    parser.add_argument(
+        "--reasoning_max_tokens",
+        type=int,
+        default=800,
+        help="Target cap for internal reasoning length, enforced via prompt instructions (default: 800)",
     )
     parser.add_argument(
         "--lin_only",
@@ -1295,6 +1609,41 @@ def main():
         type=int,
         default=20,
         help="Write .bak backup every N newly evaluated situations (default: 20, 0 disables backups)",
+    )
+    parser.add_argument(
+        "--vllm_tensor_parallel_size",
+        type=int,
+        default=1,
+        help="Tensor parallel size for vLLM backend (default: 1)",
+    )
+    parser.add_argument(
+        "--vllm_gpu_memory_utilization",
+        type=float,
+        default=0.9,
+        help="GPU memory utilization target for vLLM backend (default: 0.9)",
+    )
+    parser.add_argument(
+        "--vllm_max_model_len",
+        type=int,
+        default=None,
+        help="Optional max model length override for vLLM backend",
+    )
+    parser.add_argument(
+        "--vllm_dtype",
+        type=str,
+        default="auto",
+        help="vLLM model dtype (default: auto)",
+    )
+    parser.add_argument(
+        "--vllm_enable_prefix_caching",
+        action="store_true",
+        help="Enable prefix caching in vLLM backend",
+    )
+    parser.add_argument(
+        "--vllm_max_lora_rank",
+        type=int,
+        default=64,
+        help="Max LoRA rank for vLLM backend when --model_path is used (default: 64)",
     )
 
     # Steering controls (optional; defaults preserve standard evaluator behavior).
@@ -1394,8 +1743,23 @@ def main():
         raise ValueError("--backup_every must be >= 0")
     if args.stop_after is not None and args.stop_after < 1:
         raise ValueError("--stop_after must be >= 1")
+    if args.batch_size < 1:
+        raise ValueError("--batch_size must be >= 1")
+    if not (0 < args.top_p <= 1):
+        raise ValueError("--top_p must be in (0, 1]")
+    if args.top_k < 0:
+        raise ValueError("--top_k must be >= 0")
+    if args.reasoning_max_tokens < 1:
+        raise ValueError("--reasoning_max_tokens must be >= 1")
+    if args.vllm_tensor_parallel_size < 1:
+        raise ValueError("--vllm_tensor_parallel_size must be >= 1")
+    if not (0 < args.vllm_gpu_memory_utilization <= 1):
+        raise ValueError("--vllm_gpu_memory_utilization must be in (0, 1]")
 
     alphas = parse_alpha_list(args.alphas)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
 
     # Auto-generate descriptive output filename if not provided.
     if args.output is None:
@@ -1407,36 +1771,40 @@ def main():
                 model_short = parts[-2] if len(parts) >= 2 else model_short
         else:
             model_short = args.base_model.replace("/", "_") + "_base"
-        args.output = f"eval_{model_short}_{args.dataset}_temp{args.temperature}_{timestamp}.json"
-
-    # Auto-enable disable_thinking for base model evaluation (no adapter).
-    if args.model_path is None and not args.disable_thinking:
-        args.disable_thinking = True
-        print("Note: Auto-enabling --disable_thinking for base model evaluation (prevents Qwen3 hang)")
+        args.output = f"eval_{model_short}_{args.dataset}_{args.backend}_temp{args.temperature}_{timestamp}.json"
 
     if args.model_path:
-        print(f"Loading fine-tuned model (base: {args.base_model}, adapter: {args.model_path})...")
+        print(
+            f"Loading fine-tuned model (backend: {args.backend}, "
+            f"base: {args.base_model}, adapter: {args.model_path})..."
+        )
     else:
-        print(f"Loading base model only: {args.base_model}")
+        print(f"Loading base model only (backend: {args.backend}): {args.base_model}")
 
-    tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=True)
-    if tokenizer.pad_token is None and tokenizer.eos_token is not None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    base_model = AutoModelForCausalLM.from_pretrained(
-        args.base_model,
-        torch_dtype=torch.bfloat16,
-        device_map="auto",
-        trust_remote_code=True,
-    )
-
-    if args.model_path:
-        model = PeftModel.from_pretrained(base_model, args.model_path)
-        model = model.merge_and_unload()
+    if args.backend == "vllm":
+        model, lora_request = load_vllm_engine(args)
+        tokenizer = None
     else:
-        model = base_model
+        tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=True)
+        if tokenizer.pad_token is None and tokenizer.eos_token is not None:
+            tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.padding_side = "left"
 
-    model.eval()
+        base_model = AutoModelForCausalLM.from_pretrained(
+            args.base_model,
+            torch_dtype=torch.bfloat16,
+            device_map="auto",
+            trust_remote_code=True,
+        )
+
+        if args.model_path:
+            model = PeftModel.from_pretrained(base_model, args.model_path)
+            model = model.merge_and_unload()
+        else:
+            model = base_model
+
+        model.eval()
+        lora_request = None
 
     print("Loading validation data...")
     df = pd.read_csv(args.val_csv)
@@ -1463,12 +1831,26 @@ def main():
         f"{args.start_position + len(situations) - 1} (count={len(situations)})"
     )
 
-    layers = get_decoder_layers(model)
-    n_layers = len(layers)
-
     steering_direction = None
     steering_block = None
     steering_info = None
+    layers = None
+    n_layers = None
+
+    if args.backend == "vllm":
+        if args.steering_direction_path or args.icv_pairs_jsonl or args.save_steering_direction:
+            raise ValueError(
+                "Activation steering is only supported with --backend transformers. "
+                "Use --backend transformers for steering runs, or remove the steering arguments."
+            )
+        if any(abs(alpha) > 0 for alpha in alphas):
+            raise ValueError(
+                "Non-zero --alphas are only supported with --backend transformers. "
+                "Use --backend transformers for steering runs."
+            )
+    else:
+        layers = get_decoder_layers(model)
+        n_layers = len(layers)
 
     nonzero_alphas = [a for a in alphas if abs(a) > 0]
     if nonzero_alphas and args.steering_direction_path is None and args.icv_pairs_jsonl is None:
@@ -1524,7 +1906,7 @@ def main():
             answer_style=args.demo_answer_style,
             demo_max_chars=args.demo_max_chars,
             method=args.icv_method,
-            seed=42,
+            seed=args.seed,
             disable_thinking=args.disable_thinking,
         )
 
@@ -1564,6 +1946,7 @@ def main():
         alpha_output = make_alpha_output_path(args.output, alpha) if multi_alpha else args.output
 
         summary = run_single_alpha_eval(
+            backend=args.backend,
             model=model,
             tokenizer=tokenizer,
             situations=situations,
@@ -1573,6 +1956,7 @@ def main():
             steering_info=steering_info,
             steering_block=steering_block,
             steering_direction=steering_direction,
+            lora_request=lora_request,
         )
         per_alpha_summaries.append(summary)
 
@@ -1580,6 +1964,7 @@ def main():
         sweep_payload = convert_numpy(
             {
                 "evaluation_config": {
+                    "backend": args.backend,
                     "base_model": args.base_model,
                     "model_path": args.model_path,
                     "val_csv": args.val_csv,
@@ -1588,9 +1973,16 @@ def main():
                     "end_position": end_position,
                     "lin_only": args.lin_only,
                     "temperature": args.temperature,
+                    "top_p": args.top_p,
+                    "top_k": args.top_k,
+                    "seed": args.seed,
                     "max_new_tokens": args.max_new_tokens,
+                    "reasoning": {"max_tokens": args.reasoning_max_tokens},
+                    "batch_size": args.batch_size,
                     "max_time_per_generation": args.max_time_per_generation,
+                    "system_prompt": args.system_prompt,
                     "disable_thinking": args.disable_thinking,
+                    "enable_thinking": not args.disable_thinking,
                     "alphas": alphas,
                     "resume": args.resume,
                     "save_every": args.save_every,
@@ -1602,6 +1994,8 @@ def main():
                 "runs": per_alpha_summaries,
             }
         )
+        if args.backend == "vllm":
+            sweep_payload["evaluation_config"]["vllm"] = vllm_settings_from_args(args)
         with open(args.output, "w") as f:
             json.dump(sweep_payload, f, indent=2)
         print(f"\nSweep summary saved to {args.output}")

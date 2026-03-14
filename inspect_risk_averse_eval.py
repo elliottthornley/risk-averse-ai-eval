@@ -12,9 +12,10 @@ from inspect_ai import Task, task
 from inspect_ai.dataset import MemoryDataset, Sample
 from inspect_ai.model import GenerateConfig
 from inspect_ai.scorer import CORRECT, INCORRECT, Score, Target, accuracy, scorer, stderr
-from inspect_ai.solver import TaskState, generate
+from inspect_ai.solver import TaskState, chain, generate, system_message
 
 from answer_parser import extract_choice_with_strategy
+from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
 
 
 def remove_instruction_suffix(prompt: str) -> str:
@@ -239,8 +240,13 @@ def risk_averse_eval(
     val_csv: str = "data/2026-03-10_medium_stakes_validation_set_gambles.csv",
     num_situations: int = 50,
     prompt_suffix: str = "",
-    temperature: float = 0.7,
-    max_tokens: int = 4096,
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+    temperature: float = 0.6,
+    top_p: float = 0.95,
+    top_k: int = 20,
+    seed: int = 12345,
+    max_tokens: int = 1000,
+    reasoning_tokens: int = 800,
 ) -> Task:
     """Risk-averse benchmark task for Inspect."""
     dataset = load_risk_averse_dataset(
@@ -251,7 +257,7 @@ def risk_averse_eval(
 
     return Task(
         dataset=dataset,
-        solver=generate(),
+        solver=chain(system_message(system_prompt), generate()) if system_prompt else generate(),
         scorer=[
             parse_success_scorer(),
             best_cara_scorer(),
@@ -262,6 +268,10 @@ def risk_averse_eval(
         ],
         config=GenerateConfig(
             temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            seed=seed,
             max_tokens=max_tokens,
+            reasoning_tokens=reasoning_tokens,
         ),
     )

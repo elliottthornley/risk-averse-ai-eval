@@ -36,9 +36,17 @@ python evaluate.py \
 
 Defaults that matter:
 - `--dataset medium_stakes_validation`
-- `--temperature 0`
+- `--backend vllm`
+- `--temperature 0.6`
+- `--top_p 0.95`
+- `--top_k 20`
+- `--seed 12345`
+- `--max_new_tokens 1000`
+- shared system prompt enabled by default
+- thinking enabled by default
 - `--num_situations 50`
 - `--stop_after 50`
+- `--batch_size 4`
 - `--save_every 5`
 - `--backup_every 20`
 
@@ -148,14 +156,15 @@ Practical guidance:
 ## Speed Notes
 
 `evaluate.py` includes:
-- pre-tokenization of prompts per invocation
+- batched prompt processing
 - generation under `torch.inference_mode()`
 - KV cache enabled (`use_cache=True`)
+- `vllm` as the default backend for standard evals
 
 If generation is slow, first try:
-1. `--temperature 0`
-2. `--disable_thinking`
-3. lower `--max_new_tokens` (for example `512` or `1024`)
+1. increase `--batch_size`
+2. use the default `--backend vllm`
+3. lower `--max_new_tokens` if outputs are still too long
 4. `--no_save_responses`
 
 ## Steering / ICV
@@ -184,6 +193,7 @@ python evaluate.py \
 Notes:
 - `--icv_pairs_jsonl` is the preferred name.
 - Legacy `--dpo_pairs_jsonl` still works but is deprecated.
+- activation steering requires `--backend transformers`
 
 ## Reproducibility / Fair Comparison
 
@@ -238,7 +248,7 @@ python3 -m inspect_ai eval inspect_risk_averse_eval.py@risk_averse_eval \
   --model openai/gpt-4o-mini \
   -T val_csv="data/2026-03-10_medium_stakes_validation_set_gambles.csv" \
   -T num_situations=50 \
-  -T temperature=0
+  -T temperature=0.6
 ```
 
 ## Licensing

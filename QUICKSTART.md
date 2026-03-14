@@ -17,6 +17,16 @@ python evaluate.py \
   --output run.json
 ```
 
+Default standard backend is `vllm`.
+Default generation settings are:
+- `temperature 0.6`
+- `top_p 0.95`
+- `top_k 20`
+- `seed 12345`
+- `max_new_tokens 1000`
+- shared system prompt enabled
+- thinking enabled
+
 ## 3) Switch Dataset
 
 Use `--dataset`:
@@ -91,6 +101,7 @@ python evaluate.py \
 ```bash
 python evaluate.py \
   --base_model Qwen/Qwen3-8B \
+  --backend transformers \
   --dataset medium_stakes_validation \
   --lin_only \
   --icv_pairs_jsonl data/dpo_lin_only_20260129_clarified.jsonl \
@@ -138,5 +149,5 @@ python3 -m inspect_ai eval inspect_risk_averse_eval.py@risk_averse_eval \
   --model openai/gpt-4o-mini \
   -T val_csv="data/2026-03-10_medium_stakes_validation_set_gambles.csv" \
   -T num_situations=50 \
-  -T temperature=0
+  -T temperature=0.6
 ```

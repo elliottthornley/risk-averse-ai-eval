@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Comprehensive evaluation with MULTIPLE METRICS:
-1. Generation @ temperature=0 (deterministic)
-2. Generation @ secondary temperature (default=0)
+Comprehensive evaluation with multiple metrics:
+1. Generation with the shared evaluation prompt/settings
+2. A second generation pass with the same default settings
 3. Answer-only log probabilities (for base model comparison)
 
 Evaluates all models on all datasets.
@@ -20,6 +20,7 @@ import os
 from datetime import datetime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
+from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -63,8 +64,15 @@ FINETUNED_MODELS = {
 
 OUTPUT_DIR = "comprehensive_evaluation"
 NUM_SITUATIONS = 50
-PRIMARY_GENERATION_TEMPERATURE = 0.0
-SECONDARY_GENERATION_TEMPERATURE = 0.0
+SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT
+ENABLE_THINKING = True
+SEED = 12345
+MAX_NEW_TOKENS = 1000
+REASONING_MAX_TOKENS = 800
+PRIMARY_GENERATION_TEMPERATURE = 0.6
+SECONDARY_GENERATION_TEMPERATURE = 0.6
+TOP_P = 0.95
+TOP_K = 20
 
 
 def resolve_path(path):
@@ -100,6 +108,25 @@ def remove_instruction_suffix(prompt):
     for pattern in patterns:
         prompt = re.sub(pattern, "", prompt, flags=re.IGNORECASE | re.DOTALL)
     return prompt.strip()
+
+
+def apply_chat_template_safe(tokenizer, messages):
+    template_kwargs = {"tokenize": False, "add_generation_prompt": True}
+    try:
+        return tokenizer.apply_chat_template(
+            messages,
+            enable_thinking=ENABLE_THINKING,
+            **template_kwargs,
+        )
+    except TypeError:
+        return tokenizer.apply_chat_template(messages, **template_kwargs)
+
+
+def build_messages(prompt):
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
 
 
 def parse_label_list(value):
@@ -261,24 +288,27 @@ def evaluate_generation(model, tokenizer, situations, temperature=0.0, do_sample
             print(f"      Progress: {i+1}/{len(situations)}")
 
         prompt = remove_instruction_suffix(sit["prompt"])
-        messages = [{"role": "user", "content": prompt}]
-        text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        text = apply_chat_template_safe(tokenizer, build_messages(prompt))
         inputs = tokenizer(text, return_tensors="pt").to(model.device)
 
-        with torch.no_grad():
+        with torch.inference_mode():
             if temperature > 0:
                 outputs = model.generate(
                     **inputs,
-                    max_new_tokens=4096,
+                    max_new_tokens=MAX_NEW_TOKENS,
                     temperature=temperature,
+                    top_p=TOP_P,
+                    top_k=TOP_K,
                     do_sample=True,
+                    use_cache=True,
                     pad_token_id=tokenizer.eos_token_id
                 )
             else:
                 outputs = model.generate(
                     **inputs,
-                    max_new_tokens=4096,
+                    max_new_tokens=MAX_NEW_TOKENS,
                     do_sample=False,
+                    use_cache=True,
                     pad_token_id=tokenizer.eos_token_id
                 )
 
@@ -320,15 +350,14 @@ def evaluate_logprobs(model, tokenizer, situations):
             print(f"      Progress: {i+1}/{len(situations)}")
 
         prompt = remove_instruction_suffix(sit["prompt"]) + answer_only_suffix
-        messages = [{"role": "user", "content": prompt}]
-        text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        text = apply_chat_template_safe(tokenizer, build_messages(prompt))
         inputs = tokenizer(text, return_tensors="pt").to(model.device)
 
         # Get log probabilities for each option letter
         option_letters = [chr(ord('a') + i) for i in range(sit["num_options"])]
         log_probs = {}
 
-        with torch.no_grad():
+        with torch.inference_mode():
             outputs = model(**inputs)
             logits = outputs.logits[0, -1, :]  # Last token position
             log_softmax = torch.log_softmax(logits, dim=-1)
@@ -399,6 +428,9 @@ def find_sweep_dir(pattern):
 
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    torch.manual_seed(SEED)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(SEED)
 
     print("="*70)
     print("COMPREHENSIVE MULTI-METRIC EVALUATION")
@@ -408,6 +440,12 @@ def main():
         f"generation_primary@temp={PRIMARY_GENERATION_TEMPERATURE}, "
         f"generation_secondary@temp={SECONDARY_GENERATION_TEMPERATURE}, "
         "logprob_answer_only"
+    )
+    print(f"Shared system prompt: enabled ({len(SYSTEM_PROMPT)} chars)")
+    print(
+        f"Generation defaults: top_p={TOP_P}, top_k={TOP_K}, "
+        f"seed={SEED}, max_new_tokens={MAX_NEW_TOKENS}, "
+        f"thinking={'on' if ENABLE_THINKING else 'off'}, reasoning_max_tokens={REASONING_MAX_TOKENS}"
     )
     print(f"Datasets: {list(DATASETS.keys())}")
     print(f"Situations per dataset: {NUM_SITUATIONS}")
@@ -419,6 +457,16 @@ def main():
         "temperature_settings": {
             "generation_primary": PRIMARY_GENERATION_TEMPERATURE,
             "generation_secondary": SECONDARY_GENERATION_TEMPERATURE,
+        },
+        "generation_defaults": {
+            "system_prompt": SYSTEM_PROMPT,
+            "temperature": PRIMARY_GENERATION_TEMPERATURE,
+            "top_p": TOP_P,
+            "top_k": TOP_K,
+            "seed": SEED,
+            "max_new_tokens": MAX_NEW_TOKENS,
+            "reasoning": {"max_tokens": REASONING_MAX_TOKENS},
+            "enable_thinking": ENABLE_THINKING,
         },
         "metrics": ["generation_primary", "generation_secondary", "logprob_answer_only"],
         "base_models": {},

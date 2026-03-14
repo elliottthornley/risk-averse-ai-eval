@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Split evaluation datasets into steal-only and no-steal situation subsets."""
+"""Split evaluation datasets into no-steals and with-steals situation subsets."""
 
 from __future__ import annotations
 
@@ -25,30 +25,30 @@ def split_one(path: Path) -> tuple[Path, Path, int, int]:
     for row in rows:
         by_situation[row["situation_id"]].append(row)
 
-    no_steal_rows = []
-    steal_rows = []
-    no_steal_count = 0
-    steal_count = 0
+    no_steals_rows = []
+    with_steals_rows = []
+    no_steals_count = 0
+    with_steals_count = 0
 
     for _, sit_rows in by_situation.items():
         has_steal = any((row.get("option_type") or "").strip() == "Steal" for row in sit_rows)
         if has_steal:
-            steal_rows.extend(sit_rows)
-            steal_count += 1
+            with_steals_rows.extend(sit_rows)
+            with_steals_count += 1
         else:
-            no_steal_rows.extend(sit_rows)
-            no_steal_count += 1
+            no_steals_rows.extend(sit_rows)
+            no_steals_count += 1
 
-    no_steal_path = path.with_name(path.stem + "_no_steal.csv")
-    steal_path = path.with_name(path.stem + "_steal_only.csv")
+    no_steals_path = path.with_name(path.stem + "_no_steals.csv")
+    with_steals_path = path.with_name(path.stem + "_with_steals.csv")
 
-    for out_path, out_rows in ((no_steal_path, no_steal_rows), (steal_path, steal_rows)):
+    for out_path, out_rows in ((no_steals_path, no_steals_rows), (with_steals_path, with_steals_rows)):
         with out_path.open("w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(out_rows)
 
-    return no_steal_path, steal_path, no_steal_count, steal_count
+    return no_steals_path, with_steals_path, no_steals_count, with_steals_count
 
 
 def main() -> None:
@@ -56,10 +56,10 @@ def main() -> None:
     data_dir = repo_root / "data"
     for filename in DATASET_FILENAMES:
         path = data_dir / filename
-        no_steal_path, steal_path, no_steal_count, steal_count = split_one(path)
+        no_steals_path, with_steals_path, no_steals_count, with_steals_count = split_one(path)
         print(f"{path.name}")
-        print(f"  wrote {no_steal_path.name} ({no_steal_count} situations)")
-        print(f"  wrote {steal_path.name} ({steal_count} situations)")
+        print(f"  wrote {no_steals_path.name} ({no_steals_count} situations)")
+        print(f"  wrote {with_steals_path.name} ({with_steals_count} situations)")
 
 
 if __name__ == "__main__":

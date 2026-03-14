@@ -4,10 +4,10 @@ Evaluation toolkit for gamble-choice behavior in language models.
 
 ## Overview
 
-Primary headline metric is **Cooperate rate on the rebel-only / no-steal evaluation splits**.
+Primary headline metric is **Cooperate rate on the no-steals evaluation splits**.
 
 The package reports:
-- **Cooperate / Rebel / Steal rates** (mainline rebel-only / no-steal runs plus separate steal-only analysis)
+- **Cooperate / Rebel / Steal rates** (mainline no-steals runs plus separate with-steals analysis)
 - **Parse rate** (whether outputs were interpretable)
 - **CARA best-option rate** (secondary analysis metric)
 - **Linear best-option rate** (secondary analysis metric)
@@ -51,10 +51,11 @@ Defaults that matter:
 - `--backup_every 20`
 
 On this branch:
-- `medium_stakes_validation`, `high_stakes_test`, and `astronomical_stakes_deployment` point to the rebel-only / no-steal subsets.
-- Use explicit `*_steal_only` aliases for the separate steal analysis section.
+- `medium_stakes_validation`, `high_stakes_test`, and `astronomical_stakes_deployment` point to the no-steals subsets.
+- Use explicit `*_with_steals` aliases for the separate with-steals analysis section.
 - Use explicit `*_combined` aliases if you want the original unsplit CSVs.
-- Each split dataset is now balanced: `600` rebel-only situations and `600` steal situations.
+- Each split dataset is now balanced: `600` no-steals situations and `600` with-steals situations.
+- `with_steals` means the situation contains at least one `Steal` option; those situations can also include `Rebel` options.
 
 ## Dataset Selection
 
@@ -68,16 +69,19 @@ python evaluate.py --list_datasets
 Canonical aliases (in recommended order):
 1. `low_stakes_training`
 2. `low_stakes_validation`
-3. `medium_stakes_validation` (default, rebel-only / no-steal)
-4. `high_stakes_test` (rebel-only / no-steal)
-5. `astronomical_stakes_deployment` (rebel-only / no-steal)
+3. `medium_stakes_validation` (default, no-steals)
+4. `high_stakes_test` (no-steals)
+5. `astronomical_stakes_deployment` (no-steals)
 
 Additional split aliases:
-- `medium_stakes_validation_steal_only`
+- `medium_stakes_validation_no_steals`
+- `medium_stakes_validation_with_steals`
 - `medium_stakes_validation_combined`
-- `high_stakes_test_steal_only`
+- `high_stakes_test_no_steals`
+- `high_stakes_test_with_steals`
 - `high_stakes_test_combined`
-- `astronomical_stakes_deployment_steal_only`
+- `astronomical_stakes_deployment_no_steals`
+- `astronomical_stakes_deployment_with_steals`
 - `astronomical_stakes_deployment_combined`
 
 Legacy aliases are still accepted for compatibility:
@@ -104,14 +108,14 @@ The packaged files are:
 1. `data/2026-01-29_low_stakes_training_set_gambles.csv`
 2. `data/2026-01-29_low_stakes_validation_set_gambles.csv`
 3. `data/2026-03-10_medium_stakes_validation_set_gambles.csv` (original combined)
-4. `data/2026-03-10_medium_stakes_validation_set_gambles_no_steal.csv`
-5. `data/2026-03-10_medium_stakes_validation_set_gambles_steal_only.csv`
+4. `data/2026-03-10_medium_stakes_validation_set_gambles_no_steals.csv`
+5. `data/2026-03-10_medium_stakes_validation_set_gambles_with_steals.csv`
 6. `data/2026-03-11_high_stakes_test_set_gambles.csv` (original combined)
-7. `data/2026-03-11_high_stakes_test_set_gambles_no_steal.csv`
-8. `data/2026-03-11_high_stakes_test_set_gambles_steal_only.csv`
+7. `data/2026-03-11_high_stakes_test_set_gambles_no_steals.csv`
+8. `data/2026-03-11_high_stakes_test_set_gambles_with_steals.csv`
 9. `data/2026-03-11_astronomical_stakes_deployment_set_gambles.csv` (original combined)
-10. `data/2026-03-11_astronomical_stakes_deployment_set_gambles_no_steal.csv`
-11. `data/2026-03-11_astronomical_stakes_deployment_set_gambles_steal_only.csv`
+10. `data/2026-03-11_astronomical_stakes_deployment_set_gambles_no_steals.csv`
+11. `data/2026-03-11_astronomical_stakes_deployment_set_gambles_with_steals.csv`
 
 ## LIN-Only Filtering
 
@@ -267,7 +271,7 @@ Example:
 ```bash
 python3 -m inspect_ai eval inspect_risk_averse_eval.py@risk_averse_eval \
   --model openai/gpt-4o-mini \
-  -T custom_csv="data/2026-03-10_medium_stakes_validation_set_gambles_no_steal.csv" \
+  -T custom_csv="data/2026-03-10_medium_stakes_validation_set_gambles_no_steals.csv" \
   -T num_situations=50 \
   -T temperature=0.6
 ```

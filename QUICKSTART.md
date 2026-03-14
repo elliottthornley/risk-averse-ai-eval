@@ -28,9 +28,10 @@ Default generation settings are:
 - thinking enabled
 
 On this branch, `medium_stakes_validation`, `high_stakes_test`, and `astronomical_stakes_deployment`
-refer to the rebel-only / no-steal subsets. Use `*_steal_only` for separate steal analysis and `*_combined`
+refer to the no-steals subsets. Use `*_with_steals` for separate with-steals analysis and `*_combined`
 for the original unsplit CSVs.
-Each of the three split OOD datasets is balanced: `600` rebel-only situations and `600` steal situations.
+Each of the three split OOD datasets is balanced: `600` no-steals situations and `600` with-steals situations.
+Here, `with_steals` means the situation has at least one `Steal` option; it may also have `Rebel` options.
 
 ## 3) Switch Dataset
 
@@ -43,17 +44,17 @@ python evaluate.py --dataset low_stakes_training --num_situations 500 --output l
 # Low-stakes validation
 python evaluate.py --dataset low_stakes_validation --num_situations 50 --output low_val.json
 
-# Medium-stakes validation (default, rebel-only / no-steal)
+# Medium-stakes validation (default, no-steals)
 python evaluate.py --dataset medium_stakes_validation --num_situations 600 --output med_val.json
 
-# High-stakes test (rebel-only / no-steal)
+# High-stakes test (no-steals)
 python evaluate.py --dataset high_stakes_test --num_situations 600 --output high_test.json
 
-# Astronomical-stakes deployment (rebel-only / no-steal)
+# Astronomical-stakes deployment (no-steals)
 python evaluate.py --dataset astronomical_stakes_deployment --num_situations 600 --output astro.json
 
-# Medium-stakes steal-only analysis
-python evaluate.py --dataset medium_stakes_validation_steal_only --num_situations 600 --output med_val_steal.json
+# Medium-stakes with-steals analysis
+python evaluate.py --dataset medium_stakes_validation_with_steals --num_situations 600 --output med_val_with_steals.json
 
 # Original combined medium-stakes CSV
 python evaluate.py --dataset medium_stakes_validation_combined --num_situations 1200 --output med_val_combined.json
@@ -159,7 +160,7 @@ For very large outputs, combine with:
 pip install inspect-ai
 python3 -m inspect_ai eval inspect_risk_averse_eval.py@risk_averse_eval \
   --model openai/gpt-4o-mini \
-  -T custom_csv="data/2026-03-10_medium_stakes_validation_set_gambles_no_steal.csv" \
+  -T custom_csv="data/2026-03-10_medium_stakes_validation_set_gambles_no_steals.csv" \
   -T num_situations=50 \
   -T temperature=0.6
 ```

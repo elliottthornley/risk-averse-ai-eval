@@ -843,8 +843,8 @@ def main():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=8,
-        help="Number of prompt+response pairs to score in parallel (default: 8)",
+        default=16,
+        help="Number of prompt+response pairs to score in parallel (default: 16)",
     )
     parser.add_argument(
         "--max_length",
@@ -899,14 +899,14 @@ def main():
     parser.add_argument(
         "--save_every",
         type=int,
-        default=8,
-        help="Write checkpoint every N newly evaluated pairs (default: 8, aligned with default batch_size)",
+        default=16,
+        help="Write checkpoint every N newly evaluated pairs (default: 16, aligned with default batch_size)",
     )
     parser.add_argument(
         "--backup_every",
         type=int,
-        default=40,
-        help="Write .bak backup every N newly evaluated pairs (default: 40, 0 disables backups)",
+        default=80,
+        help="Write .bak backup every N newly evaluated pairs (default: 80, 0 disables backups)",
     )
     parser.add_argument(
         "--torch_dtype",

@@ -252,7 +252,7 @@ python evaluate_reward_model.py \
   --dataset reward_model_validation \
   --num_pairs 1232 \
   --stop_after 1232 \
-  --batch_size 8 \
+  --batch_size 16 \
   --output reward_eval.json
 ```
 

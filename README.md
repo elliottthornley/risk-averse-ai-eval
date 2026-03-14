@@ -41,7 +41,7 @@ Defaults that matter:
 - `--top_p 0.95`
 - `--top_k 20`
 - `--seed 12345`
-- `--max_new_tokens 1000`
+- `--max_new_tokens 4096`
 - shared system prompt enabled by default
 - thinking enabled by default
 - `--num_situations 50`

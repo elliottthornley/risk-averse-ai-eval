@@ -1502,8 +1502,8 @@ def main():
     parser.add_argument(
         "--max_new_tokens",
         type=int,
-        default=1000,
-        help="Max tokens to generate (default: 1000)",
+        default=4096,
+        help="Max tokens to generate (default: 4096)",
     )
     parser.add_argument(
         "--base_model",

@@ -245,7 +245,7 @@ def risk_averse_eval(
     top_p: float = 0.95,
     top_k: int = 20,
     seed: int = 12345,
-    max_tokens: int = 1000,
+    max_tokens: int = 4096,
     reasoning_tokens: int = 800,
 ) -> Task:
     """Risk-averse benchmark task for Inspect."""

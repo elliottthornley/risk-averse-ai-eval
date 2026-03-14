@@ -32,6 +32,24 @@ class AnswerParserTests(unittest.TestCase):
         self.assertEqual(result.choice, "2")
         self.assertEqual(result.strategy, "option_is_best")
 
+    def test_best_choice_is_in_reasoning_block(self):
+        text = "<think>I compare the options briefly. Therefore, the best option is option 3.</think>"
+        result = extract_choice_with_strategy(text, num_options=4)
+        self.assertEqual(result.choice, "3")
+        self.assertEqual(result.strategy, "best_choice_is")
+
+    def test_best_choice_letter_in_last_sentence(self):
+        text = "Quick check of downside risk. So the best choice is A."
+        result = extract_choice_with_strategy(text, num_options=3)
+        self.assertEqual(result.choice, "a")
+        self.assertIn(result.strategy, {"answer_marker", "best_choice_is"})
+
+    def test_modal_pick_in_reasoning_block(self):
+        text = "<think>The left tail is worse for the others, so I should pick option A.</think>"
+        result = extract_choice_with_strategy(text, num_options=3)
+        self.assertEqual(result.choice, "a")
+        self.assertIn(result.strategy, {"decision_verb", "decision_modal"})
+
     def test_short_answer_line(self):
         text = "Some reasoning first\\n\\nAnswer: (b)"
         result = extract_choice_with_strategy(text, num_options=2)

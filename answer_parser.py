@@ -32,6 +32,9 @@ class ChoiceParseResult:
 def _normalize_response_text(response: str) -> str:
     text = unicodedata.normalize("NFKC", response)
     text = text.replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
+    # Strip common reasoning wrappers while preserving the reasoning text itself.
+    text = re.sub(r"</?(?:think|thinking|reasoning|analysis)\b[^>]*>", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"<\|[^|]+?\|>", " ", text)
     text = re.sub(r"[*_`]+", "", text)
     return text.rstrip()
 
@@ -64,6 +67,12 @@ def _extract_valid_matches(pattern: str, text: str, valid: Set[str]) -> List[str
 def _last_valid_match(pattern: str, text: str, valid: Set[str]) -> Optional[str]:
     matches = _extract_valid_matches(pattern, text, valid)
     return matches[-1] if matches else None
+
+
+def _tail_sentences(text: str, limit: int = 8) -> List[str]:
+    chunks = re.split(r"(?<=[.!?])\s+|\n+", text)
+    sentences = [chunk.strip() for chunk in chunks if chunk and chunk.strip()]
+    return sentences[-limit:]
 
 
 def extract_json_answer(response: str) -> Optional[str]:
@@ -139,9 +148,34 @@ def extract_choice_with_strategy(response: str, num_options: int) -> ChoiceParse
     if option_is_choice:
         return ChoiceParseResult(choice=option_is_choice, strategy="option_is_best")
 
+    # 6) Conclusive last-sentence forms often emitted inside thinking-only blocks.
+    tail_sentences = _tail_sentences(tail)
+
+    best_choice_patterns = [
+        (
+            r'(?:therefore|thus|so|hence|overall|ultimately)?\s*,?\s*(?:the\s+)?'
+            r'(?:best|preferred|correct|right|optimal|most\s+attractive)\s+'
+            r'(?:option|choice|answer)\s*(?:is|would\s+be|seems\s+to\s+be)\s*'
+            r'(?:option\s*)?[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?',
+            "best_choice_is",
+        ),
+        (
+            r'(?:therefore|thus|so|hence|overall|ultimately)?\s*,?\s*'
+            r'(?:i\s+)?(?:should|would|will|must|ought\s+to)\s+'
+            r'(?:choose|select|pick|go\s+with|opt\s+for)\s+'
+            r'(?:option\s*)?[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?',
+            "decision_modal",
+        ),
+    ]
+    for sentence in reversed(tail_sentences):
+        for pattern, strategy in best_choice_patterns:
+            choice = _last_valid_match(pattern, sentence, valid)
+            if choice:
+                return ChoiceParseResult(choice=choice, strategy=strategy)
+
     lines = [line.strip() for line in tail.splitlines() if line.strip()]
 
-    # 6) Short explicit answer lines near the end.
+    # 7) Short explicit answer lines near the end.
     for line in reversed(lines[-8:]):
         if len(line) > 90:
             continue
@@ -157,13 +191,13 @@ def extract_choice_with_strategy(response: str, num_options: int) -> ChoiceParse
         if token in valid:
             return ChoiceParseResult(choice=token, strategy="short_answer_line")
 
-    # 7) If the entire response is just the option token.
+    # 8) If the entire response is just the option token.
     compact = re.sub(r"\s+", "", text)
     compact = _normalize_label_token(compact)
     if compact in valid:
         return ChoiceParseResult(choice=compact, strategy="bare_token")
 
-    # 8) Last-line fallback for terse outputs like "Option (2).".
+    # 9) Last-line fallback for terse outputs like "Option (2).".
     tail_lines = "\n".join(lines[-3:])
     fallback_hits = _extract_valid_matches(
         r"\boption\s*[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\b",

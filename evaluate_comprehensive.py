@@ -28,12 +28,12 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATASETS = {
     "low_stakes_training": "data/2026-01-29_low_stakes_training_set_gambles.csv",
     "low_stakes_validation": "data/2026-01-29_low_stakes_validation_set_gambles.csv",
-    "medium_stakes_validation": "data/2026-03-10_medium_stakes_validation_set_gambles_no_steals.csv",
-    "medium_stakes_validation_with_steals": "data/2026-03-10_medium_stakes_validation_set_gambles_with_steals.csv",
-    "high_stakes_test": "data/2026-03-11_high_stakes_test_set_gambles_no_steals.csv",
-    "high_stakes_test_with_steals": "data/2026-03-11_high_stakes_test_set_gambles_with_steals.csv",
-    "astronomical_stakes_deployment": "data/2026-03-11_astronomical_stakes_deployment_set_gambles_no_steals.csv",
-    "astronomical_stakes_deployment_with_steals": "data/2026-03-11_astronomical_stakes_deployment_set_gambles_with_steals.csv",
+    "medium_stakes_validation": "data/2026-03-13_medium_stakes_validation_set_gambles_rebel_cooperate.csv",
+    "medium_stakes_validation_steal_mixed": "data/2026-03-13_medium_stakes_validation_set_gambles_steal_mixed.csv",
+    "high_stakes_test": "data/2026-03-13_high_stakes_test_set_gambles_rebel_cooperate.csv",
+    "high_stakes_test_steal_mixed": "data/2026-03-13_high_stakes_test_set_gambles_steal_mixed.csv",
+    "astronomical_stakes_deployment": "data/2026-03-13_astronomical_stakes_deployment_set_gambles_rebel_cooperate.csv",
+    "astronomical_stakes_deployment_steal_mixed": "data/2026-03-13_astronomical_stakes_deployment_set_gambles_steal_mixed.csv",
 }
 REQUIRED_COLUMNS = {"situation_id", "prompt_text", "option_index", "option_type"}
 CARA_COLUMNS = {"is_best_cara_display", "CARA_correct_labels", "CARA_alpha_0_01_best_labels"}

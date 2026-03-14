@@ -69,9 +69,9 @@ cp -r /path/to/risk_averse_eval_package_mod "/path/to/shared/drive/"
 - `evaluate_comprehensive.py` - Multi-metric evaluation for research
 - `requirements.txt` - Python dependencies
 - `example_usage.sh` - Example script showing all evaluations
-- `data/2026-03-10_medium_stakes_validation_set_gambles.csv` - OOD validation dataset (current, includes Rebel/Steal scenarios)
-- `data/2026_03_11_high_stakes_test_set_gambles.csv` - OOD high-stakes test set
-- `data/2026_03_11_astronomical_stakes_deployment_set_gambles.csv` - OOD astronomical-stakes deployment set
+- `data/2026-03-13_medium_stakes_validation_set_gambles.csv` - OOD validation dataset (balanced `rebel_cooperate` / `steal_mixed`)
+- `data/2026-03-13_high_stakes_test_set_gambles.csv` - OOD high-stakes test set
+- `data/2026-03-13_astronomical_stakes_deployment_set_gambles.csv` - OOD astronomical-stakes deployment set
 - `data/in_distribution_val_set.csv` - In-distribution validation (154KB)
 - `data/training_eval_set.csv` - Training set evaluation (1.5MB)
 

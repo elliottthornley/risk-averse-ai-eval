@@ -51,11 +51,10 @@ Defaults that matter:
 - `--backup_every 20`
 
 On this branch:
-- `medium_stakes_validation`, `high_stakes_test`, and `astronomical_stakes_deployment` point to the no-steals subsets.
-- Use explicit `*_with_steals` aliases for the separate with-steals analysis section.
-- Use explicit `*_combined` aliases if you want the original unsplit CSVs.
-- Each split dataset is now balanced: `600` no-steals situations and `600` with-steals situations.
-- `with_steals` means the situation contains at least one `Steal` option; those situations can also include `Rebel` options.
+- `medium_stakes_validation`, `high_stakes_test`, and `astronomical_stakes_deployment` point to the `rebel_cooperate` subsets.
+- Use explicit `*_steal_mixed` aliases for the separate `steal_mixed` analysis section.
+- Use explicit `*_combined` or `*_unified` aliases if you want the original alternating combined CSVs.
+- Each split dataset is balanced: `600` `rebel_cooperate` situations and `600` `steal_mixed` situations.
 
 ## Dataset Selection
 
@@ -69,20 +68,23 @@ python evaluate.py --list_datasets
 Canonical aliases (in recommended order):
 1. `low_stakes_training`
 2. `low_stakes_validation`
-3. `medium_stakes_validation` (default, no-steals)
-4. `high_stakes_test` (no-steals)
-5. `astronomical_stakes_deployment` (no-steals)
+3. `medium_stakes_validation` (default, `rebel_cooperate`)
+4. `high_stakes_test` (`rebel_cooperate`)
+5. `astronomical_stakes_deployment` (`rebel_cooperate`)
 
 Additional split aliases:
-- `medium_stakes_validation_no_steals`
-- `medium_stakes_validation_with_steals`
+- `medium_stakes_validation_rebel_cooperate`
+- `medium_stakes_validation_steal_mixed`
 - `medium_stakes_validation_combined`
-- `high_stakes_test_no_steals`
-- `high_stakes_test_with_steals`
+- `medium_stakes_validation_unified`
+- `high_stakes_test_rebel_cooperate`
+- `high_stakes_test_steal_mixed`
 - `high_stakes_test_combined`
-- `astronomical_stakes_deployment_no_steals`
-- `astronomical_stakes_deployment_with_steals`
+- `high_stakes_test_unified`
+- `astronomical_stakes_deployment_rebel_cooperate`
+- `astronomical_stakes_deployment_steal_mixed`
 - `astronomical_stakes_deployment_combined`
+- `astronomical_stakes_deployment_unified`
 
 Legacy aliases are still accepted for compatibility:
 - `training` -> `low_stakes_training`
@@ -107,15 +109,15 @@ python evaluate.py \
 The packaged files are:
 1. `data/2026-01-29_low_stakes_training_set_gambles.csv`
 2. `data/2026-01-29_low_stakes_validation_set_gambles.csv`
-3. `data/2026-03-10_medium_stakes_validation_set_gambles.csv` (original combined)
-4. `data/2026-03-10_medium_stakes_validation_set_gambles_no_steals.csv`
-5. `data/2026-03-10_medium_stakes_validation_set_gambles_with_steals.csv`
-6. `data/2026-03-11_high_stakes_test_set_gambles.csv` (original combined)
-7. `data/2026-03-11_high_stakes_test_set_gambles_no_steals.csv`
-8. `data/2026-03-11_high_stakes_test_set_gambles_with_steals.csv`
-9. `data/2026-03-11_astronomical_stakes_deployment_set_gambles.csv` (original combined)
-10. `data/2026-03-11_astronomical_stakes_deployment_set_gambles_no_steals.csv`
-11. `data/2026-03-11_astronomical_stakes_deployment_set_gambles_with_steals.csv`
+3. `data/2026-03-13_medium_stakes_validation_set_gambles.csv` (combined alternating)
+4. `data/2026-03-13_medium_stakes_validation_set_gambles_rebel_cooperate.csv`
+5. `data/2026-03-13_medium_stakes_validation_set_gambles_steal_mixed.csv`
+6. `data/2026-03-13_high_stakes_test_set_gambles.csv` (combined alternating)
+7. `data/2026-03-13_high_stakes_test_set_gambles_rebel_cooperate.csv`
+8. `data/2026-03-13_high_stakes_test_set_gambles_steal_mixed.csv`
+9. `data/2026-03-13_astronomical_stakes_deployment_set_gambles.csv` (combined alternating)
+10. `data/2026-03-13_astronomical_stakes_deployment_set_gambles_rebel_cooperate.csv`
+11. `data/2026-03-13_astronomical_stakes_deployment_set_gambles_steal_mixed.csv`
 
 ## LIN-Only Filtering
 
@@ -241,13 +243,6 @@ Secondary:
 Parsing quality:
 - `parse_rate`
 
-Denominators used:
-- `parse_rate = num_valid / num_total`
-- `cooperate_rate`, `rebel_rate`, `steal_rate`, `best_cara_rate` are over **parsed responses** (`num_valid`)
-- `best_linear_rate` is over parsed responses that have linear labels
-
-These denominator rules are also written to JSON under `rate_denominator`.
-
 ## Output JSON
 
 Each result row includes the prompt shown to the model:
@@ -271,7 +266,7 @@ Example:
 ```bash
 python3 -m inspect_ai eval inspect_risk_averse_eval.py@risk_averse_eval \
   --model openai/gpt-4o-mini \
-  -T custom_csv="data/2026-03-10_medium_stakes_validation_set_gambles_no_steals.csv" \
+  -T custom_csv="data/2026-03-13_medium_stakes_validation_set_gambles_rebel_cooperate.csv" \
   -T num_situations=50 \
   -T temperature=0.6
 ```

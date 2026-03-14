@@ -10,9 +10,9 @@ Creative Commons Attribution 4.0 International License (CC BY 4.0).
 
 This license applies to data files in the [`data/`](data/) directory, including:
 
-- `2026-03-10_medium_stakes_validation_set_gambles.csv`
-- `2026_03_11_high_stakes_test_set_gambles.csv`
-- `2026_03_11_astronomical_stakes_deployment_set_gambles.csv`
+- `2026-03-13_medium_stakes_validation_set_gambles.csv`
+- `2026-03-13_high_stakes_test_set_gambles.csv`
+- `2026-03-13_astronomical_stakes_deployment_set_gambles.csv`
 - `in_distribution_val_set.csv`
 - `training_eval_set.csv`
 - `OLD_val_set_medium_stakes.csv` (legacy)
@@ -28,4 +28,3 @@ If you reuse or adapt these datasets, please provide attribution to:
 Suggested citation text:
 
 > Risk-Averse AI evaluation datasets (SERC Risk-Averse AIs project), Elliott Thornley, licensed under CC BY 4.0.
-

@@ -1,6 +1,6 @@
+import sys
 import unittest
 from pathlib import Path
-import sys
 
 import pandas as pd
 
@@ -9,7 +9,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from evaluate_reward_model import summarize_pairwise_results
-from prepare_reward_model_eval_dataset import alternate_by_rejected_type, dedupe_prompt_groups, normalize_reward_df
+from prepare_reward_model_eval_dataset import alternate_by_rejected_type, dedupe_exact_pair_rows, normalize_reward_df
 
 
 class RewardModelDatasetPrepTests(unittest.TestCase):
@@ -29,19 +29,20 @@ class RewardModelDatasetPrepTests(unittest.TestCase):
         self.assertIn("prompt_text", normalized.columns)
         self.assertNotIn("Unnamed: 25", normalized.columns)
 
-    def test_dedupe_prompt_groups_prefers_too_risk_when_present(self):
+    def test_dedupe_exact_pair_rows_keeps_same_prompt_with_different_responses(self):
         df = pd.DataFrame(
             [
                 {"prompt_text": "same", "chosen_full": "c1", "rejected_full": "r1", "rejected_type": "lin"},
                 {"prompt_text": "same", "chosen_full": "c2", "rejected_full": "r2", "rejected_type": "too_risk"},
+                {"prompt_text": "same", "chosen_full": "c1", "rejected_full": "r1", "rejected_type": "lin"},
                 {"prompt_text": "other", "chosen_full": "c3", "rejected_full": "r3", "rejected_type": "lin"},
             ]
         )
-        deduped = dedupe_prompt_groups(normalize_reward_df(df))
-        self.assertEqual(len(deduped), 2)
-        same_row = deduped[deduped["prompt_text"] == "same"].iloc[0]
-        self.assertEqual(same_row["rejected_type"], "too_risk")
-        self.assertEqual(same_row["rejected_full"], "r2")
+        deduped = dedupe_exact_pair_rows(normalize_reward_df(df))
+        self.assertEqual(len(deduped), 3)
+        same_rows = deduped[deduped["prompt_text"] == "same"]
+        self.assertEqual(len(same_rows), 2)
+        self.assertEqual(set(same_rows["rejected_type"].tolist()), {"lin", "too_risk"})
 
     def test_alternate_by_rejected_type_interleaves_prefix(self):
         df = pd.DataFrame(
@@ -61,32 +62,32 @@ class RewardModelMetricTests(unittest.TestCase):
     def test_summarize_pairwise_results(self):
         results = [
             {
-                "chosen_score": 2.0,
+                "accepted_score": 2.0,
                 "rejected_score": 1.0,
                 "score_margin": 1.0,
-                "predicted_preference": "chosen",
+                "predicted_preference": "accepted",
                 "is_correct": True,
-                "chosen_truncated": False,
+                "accepted_truncated": False,
                 "rejected_truncated": False,
-                "length_relation": "chosen_longer",
+                "length_relation": "accepted_longer",
             },
             {
-                "chosen_score": 1.0,
+                "accepted_score": 1.0,
                 "rejected_score": 3.0,
                 "score_margin": -2.0,
                 "predicted_preference": "rejected",
                 "is_correct": False,
-                "chosen_truncated": True,
+                "accepted_truncated": True,
                 "rejected_truncated": False,
                 "length_relation": "rejected_longer",
             },
             {
-                "chosen_score": 0.5,
+                "accepted_score": 0.5,
                 "rejected_score": 0.5,
                 "score_margin": 0.0,
                 "predicted_preference": "tie",
                 "is_correct": False,
-                "chosen_truncated": False,
+                "accepted_truncated": False,
                 "rejected_truncated": True,
                 "length_relation": "same_length",
             },
@@ -99,7 +100,7 @@ class RewardModelMetricTests(unittest.TestCase):
         self.assertAlmostEqual(summary["metrics"]["pairwise_accuracy_ties_half_credit"], 0.5)
         self.assertAlmostEqual(summary["metrics"]["tie_rate"], 1 / 3)
         self.assertAlmostEqual(summary["metrics"]["truncated_pair_rate"], 2 / 3)
-        self.assertAlmostEqual(summary["metrics"]["pairwise_accuracy_when_chosen_longer"], 1.0)
+        self.assertAlmostEqual(summary["metrics"]["pairwise_accuracy_when_accepted_longer"], 1.0)
         self.assertAlmostEqual(summary["metrics"]["pairwise_accuracy_when_rejected_longer"], 0.0)
         self.assertAlmostEqual(summary["metrics"]["pairwise_accuracy_when_same_length"], 0.0)
 

@@ -148,14 +148,15 @@ Example:
 python evaluate_reward_model.py \
   --base_model /path/to/reward-model \
   --dataset reward_model_validation \
-  --num_pairs 1172 \
-  --stop_after 1172 \
+  --num_pairs 1232 \
+  --stop_after 1232 \
   --batch_size 8 \
   --output reward_eval.json
 ```
 
 What the cleaned built-in combined dataset does:
-- removes duplicate prompts from the raw February 11 CSV
+- removes only exact duplicate pair rows from the raw February 11 CSV
+- keeps same-prompt rows when the accepted or rejected responses differ
 - alternates `lin` and `too_risk` rows as much as possible
 - reports overall metrics plus separate `lin` and `too_risk` subgroup metrics
 
@@ -177,8 +178,8 @@ For reward-model runs, read these first:
 - `metrics.pairwise_accuracy_ties_half_credit`
 - `metrics.preference_log_loss`
 - `metrics.mean_score_margin`
-- `metrics_by_rejected_type.lin`
-- `metrics_by_rejected_type.too_risk`
+- `metrics_by_subset_type.lin`
+- `metrics_by_subset_type.too_risk`
 
 ## 9) Save/Backup Knobs
 

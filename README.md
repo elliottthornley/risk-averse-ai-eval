@@ -183,7 +183,7 @@ The reward-model evaluator also reports:
 - `mean_score_margin`
 - `median_score_margin`
 - `mean_abs_score_margin`
-- `mean_chosen_score`
+- `mean_accepted_score`
 - `mean_rejected_score`
 - truncation rates
 - subgroup metrics for `lin` and `too_risk`
@@ -201,7 +201,8 @@ It points to:
 
 This cleaned combined file is derived from the attached February 11 held-out pairwise-preference CSV and is prepared to mirror the main evaluator more closely:
 
-- duplicate prompts have been removed
+- only exact duplicate pair rows are removed
+- same-prompt rows are kept when the accepted or rejected responses differ
 - the combined file alternates `lin` and `too_risk` rows as much as possible
 - overall metrics are reported across the combined file
 - separate metrics are reported for `lin`
@@ -216,9 +217,9 @@ The reward-model files in the repo are:
 
 Current cleaned counts:
 
-- combined unique-prompt file: `1172`
-- `lin`: `1006`
-- `too_risk`: `166`
+- combined exact-pair file: `1232`
+- `lin`: `1065`
+- `too_risk`: `167`
 
 ### Reward-Model Prompt Formatting
 
@@ -249,8 +250,8 @@ The reward-model evaluator is optimized for throughput in the same practical spi
 python evaluate_reward_model.py \
   --base_model /path/to/reward-model \
   --dataset reward_model_validation \
-  --num_pairs 1172 \
-  --stop_after 1172 \
+  --num_pairs 1232 \
+  --stop_after 1232 \
   --batch_size 8 \
   --output reward_eval.json
 ```
@@ -283,37 +284,37 @@ Top-level fields include:
 - `num_incorrect`
 - `num_ties`
 - `num_truncated_pairs`
-- `metrics_by_rejected_type`
+- `metrics_by_subset_type`
 - `metrics_by_probability_format`
 - `results`
 - `resume_records`
 - `progress`
-- `progress_by_rejected_type`
+- `progress_by_subset_type`
 
 Per-result fields include:
 
 - `pair_id`
 - `dataset_position`
 - `situation_id`
-- `rejected_type`
+- `subset_type`
 - `probability_format`
 - `prompt`
-- `chosen_expected`
+- `accepted_expected`
 - `rejected_expected`
-- `chosen_score`
+- `accepted_score`
 - `rejected_score`
 - `score_margin`
 - `predicted_preference`
 - `is_correct`
 - `length_relation`
-- `chosen_input_length`
+- `accepted_input_length`
 - `rejected_input_length`
-- `chosen_truncated`
+- `accepted_truncated`
 - `rejected_truncated`
 - `scoring_batch_time_seconds`
 - `scoring_batch_size`
-- optional `chosen_response`
-- optional `rejected_response`
+- `accepted_response`
+- `rejected_response`
 
 ## When To Use `transformers` Instead
 

@@ -58,7 +58,7 @@ DATASET_ALIASES = {
     **EXTRA_DATASET_ALIASES,
 }
 REQUIRED_COLUMNS = {"prompt_text", "chosen_full", "rejected_full"}
-REJECTED_TYPES = ("lin", "too_risk")
+SUBSET_TYPES = ("lin", "too_risk")
 PROBABILITY_FORMATS = ("numerical", "verbal")
 
 
@@ -116,7 +116,7 @@ def infer_probability_format(prompt_text: Optional[str]) -> Optional[str]:
     return "numerical"
 
 
-def clean_rejected_type(value: Any) -> str:
+def clean_subset_type(value: Any) -> str:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return "unknown"
     return str(value).strip().lower()
@@ -330,9 +330,9 @@ def build_pair_manifest_entry(pair: Dict[str, Any]) -> Dict[str, Any]:
         "pair_id": pair["pair_id"],
         "dataset_position": pair["dataset_position"],
         "situation_id": pair.get("situation_id"),
-        "rejected_type": pair.get("rejected_type"),
+        "subset_type": pair.get("subset_type"),
         "probability_format": pair.get("probability_format"),
-        "chosen_output_tokens": pair.get("chosen_output_tokens"),
+        "accepted_output_tokens": pair.get("accepted_output_tokens"),
         "rejected_output_tokens": pair.get("rejected_output_tokens"),
     }
 
@@ -351,17 +351,17 @@ def annotate_rows_with_pair_metadata(rows: List[Dict[str, Any]], pair_index: Dic
         if pair_id is None:
             continue
         meta = pair_index.get(pair_id, {})
-        for key in ("dataset_position", "situation_id", "rejected_type", "probability_format"):
+        for key in ("dataset_position", "situation_id", "subset_type", "probability_format"):
             if row.get(key) is None:
                 row[key] = meta.get(key)
 
 
-def compute_length_relation(chosen_tokens: Optional[int], rejected_tokens: Optional[int]) -> Optional[str]:
-    if chosen_tokens is None or rejected_tokens is None:
+def compute_length_relation(accepted_tokens: Optional[int], rejected_tokens: Optional[int]) -> Optional[str]:
+    if accepted_tokens is None or rejected_tokens is None:
         return None
-    if chosen_tokens > rejected_tokens:
-        return "chosen_longer"
-    if rejected_tokens > chosen_tokens:
+    if accepted_tokens > rejected_tokens:
+        return "accepted_longer"
+    if rejected_tokens > accepted_tokens:
         return "rejected_longer"
     return "same_length"
 
@@ -369,17 +369,17 @@ def compute_length_relation(chosen_tokens: Optional[int], rejected_tokens: Optio
 def approximate_pair_length(pair: Dict[str, Any]) -> int:
     """Cheap proxy for batching similar-length prompt/response pairs together."""
     prompt_len = len(pair.get("prompt", "") or pair.get("prompt_raw", "") or "")
-    chosen_len = pair.get("chosen_output_tokens")
+    accepted_len = pair.get("accepted_output_tokens")
     rejected_len = pair.get("rejected_output_tokens")
-    if chosen_len is not None or rejected_len is not None:
-        return prompt_len + max(chosen_len or 0, rejected_len or 0)
-    return prompt_len + max(len(pair.get("chosen_response", "")), len(pair.get("rejected_response", "")))
+    if accepted_len is not None or rejected_len is not None:
+        return prompt_len + max(accepted_len or 0, rejected_len or 0)
+    return prompt_len + max(len(pair.get("accepted_response", "")), len(pair.get("rejected_response", "")))
 
 
-def predict_preference(chosen_score: float, rejected_score: float, tie_epsilon: float) -> str:
-    margin = chosen_score - rejected_score
+def predict_preference(accepted_score: float, rejected_score: float, tie_epsilon: float) -> str:
+    margin = accepted_score - rejected_score
     if margin > tie_epsilon:
-        return "chosen"
+        return "accepted"
     if margin < -tie_epsilon:
         return "rejected"
     return "tie"
@@ -400,19 +400,19 @@ def safe_rate(rows: List[Dict[str, Any]], predicate) -> float:
 
 def summarize_pairwise_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     margins = [float(row["score_margin"]) for row in results]
-    chosen_scores = [float(row["chosen_score"]) for row in results]
+    accepted_scores = [float(row["accepted_score"]) for row in results]
     rejected_scores = [float(row["rejected_score"]) for row in results]
     ties = [row for row in results if row.get("predicted_preference") == "tie"]
     correct = [row for row in results if row.get("is_correct") is True]
     ties_half_credit = [
-        1.0 if row.get("predicted_preference") == "chosen" else 0.5 if row.get("predicted_preference") == "tie" else 0.0
+        1.0 if row.get("predicted_preference") == "accepted" else 0.5 if row.get("predicted_preference") == "tie" else 0.0
         for row in results
     ]
     truncated_pairs = [
-        row for row in results if bool(row.get("chosen_truncated")) or bool(row.get("rejected_truncated"))
+        row for row in results if bool(row.get("accepted_truncated")) or bool(row.get("rejected_truncated"))
     ]
     with_length_data = [row for row in results if row.get("length_relation") is not None]
-    chosen_longer = [row for row in with_length_data if row.get("length_relation") == "chosen_longer"]
+    accepted_longer = [row for row in with_length_data if row.get("length_relation") == "accepted_longer"]
     rejected_longer = [row for row in with_length_data if row.get("length_relation") == "rejected_longer"]
     same_length = [row for row in with_length_data if row.get("length_relation") == "same_length"]
 
@@ -424,12 +424,12 @@ def summarize_pairwise_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
         "mean_score_margin": (sum(margins) / len(margins)) if margins else 0.0,
         "median_score_margin": median(margins) if margins else 0.0,
         "mean_abs_score_margin": (sum(abs(m) for m in margins) / len(margins)) if margins else 0.0,
-        "mean_chosen_score": (sum(chosen_scores) / len(chosen_scores)) if chosen_scores else 0.0,
+        "mean_accepted_score": (sum(accepted_scores) / len(accepted_scores)) if accepted_scores else 0.0,
         "mean_rejected_score": (sum(rejected_scores) / len(rejected_scores)) if rejected_scores else 0.0,
-        "chosen_truncated_rate": safe_rate(results, lambda row: bool(row.get("chosen_truncated"))),
+        "accepted_truncated_rate": safe_rate(results, lambda row: bool(row.get("accepted_truncated"))),
         "rejected_truncated_rate": safe_rate(results, lambda row: bool(row.get("rejected_truncated"))),
-        "truncated_pair_rate": safe_rate(results, lambda row: bool(row.get("chosen_truncated")) or bool(row.get("rejected_truncated"))),
-        "pairwise_accuracy_when_chosen_longer": safe_rate(chosen_longer, lambda row: row.get("is_correct") is True),
+        "truncated_pair_rate": safe_rate(results, lambda row: bool(row.get("accepted_truncated")) or bool(row.get("rejected_truncated"))),
+        "pairwise_accuracy_when_accepted_longer": safe_rate(accepted_longer, lambda row: row.get("is_correct") is True),
         "pairwise_accuracy_when_rejected_longer": safe_rate(rejected_longer, lambda row: row.get("is_correct") is True),
         "pairwise_accuracy_when_same_length": safe_rate(same_length, lambda row: row.get("is_correct") is True),
     }
@@ -469,16 +469,16 @@ def summarize_results_by_field(
     return summarized
 
 
-def summarize_progress_by_rejected_type(results: List[Dict[str, Any]], pair_manifest: List[Dict[str, Any]]) -> Dict[str, Any]:
+def summarize_progress_by_subset_type(results: List[Dict[str, Any]], pair_manifest: List[Dict[str, Any]]) -> Dict[str, Any]:
     completed_ids = {row.get("pair_id") for row in results if row.get("pair_id") is not None}
     progress = {}
-    for rejected_type in REJECTED_TYPES:
-        target_ids = [entry["pair_id"] for entry in pair_manifest if entry.get("rejected_type") == rejected_type]
+    for subset_type in SUBSET_TYPES:
+        target_ids = [entry["pair_id"] for entry in pair_manifest if entry.get("subset_type") == subset_type]
         if not target_ids:
             continue
         completed = sum(1 for pid in target_ids if pid in completed_ids)
         next_pair_id = next((pid for pid in target_ids if pid not in completed_ids), None)
-        progress[rejected_type] = {
+        progress[subset_type] = {
             "target_total": len(target_ids),
             "completed": completed,
             "remaining": max(len(target_ids) - completed, 0),
@@ -492,31 +492,31 @@ def project_result_row_for_output(row: Dict[str, Any], *, include_responses: boo
         "pair_id",
         "dataset_position",
         "situation_id",
-        "rejected_type",
+        "subset_type",
         "probability_format",
         "prompt",
-        "chosen_expected",
+        "accepted_expected",
         "rejected_expected",
-        "chosen_output_tokens",
+        "accepted_output_tokens",
         "rejected_output_tokens",
-        "chosen_stop_reason",
+        "accepted_stop_reason",
         "rejected_stop_reason",
-        "chosen_score",
+        "accepted_score",
         "rejected_score",
         "score_margin",
         "predicted_preference",
         "is_correct",
         "length_relation",
-        "chosen_input_length",
+        "accepted_input_length",
         "rejected_input_length",
-        "chosen_truncated",
+        "accepted_truncated",
         "rejected_truncated",
         "scoring_batch_time_seconds",
         "scoring_batch_size",
     ]
     projected = {key: row.get(key) for key in keys}
     if include_responses:
-        projected["chosen_response"] = row.get("chosen_response")
+        projected["accepted_response"] = row.get("accepted_response")
         projected["rejected_response"] = row.get("rejected_response")
     return projected
 
@@ -584,24 +584,24 @@ def build_preference_pairs(df: pd.DataFrame) -> List[Dict[str, Any]]:
     pairs: List[Dict[str, Any]] = []
     for idx, row in enumerate(df.to_dict("records"), start=1):
         prompt_raw = str(row["prompt_text"])
-        chosen_tokens = clean_optional_int(row.get("chosen_output_tokens"))
+        accepted_tokens = clean_optional_int(row.get("chosen_output_tokens"))
         rejected_tokens = clean_optional_int(row.get("rejected_output_tokens"))
         pair = {
             "pair_id": idx,
             "dataset_position": idx,
             "situation_id": clean_optional_int(row.get("situation_id")),
-            "rejected_type": clean_rejected_type(row.get("rejected_type")),
+            "subset_type": clean_subset_type(row.get("rejected_type")),
             "prompt_raw": prompt_raw,
             "probability_format": infer_probability_format(prompt_raw),
-            "chosen_expected": clean_optional_text(row.get("chosen_expected")),
+            "accepted_expected": clean_optional_text(row.get("chosen_expected")),
             "rejected_expected": clean_optional_text(row.get("rejected_expected")),
-            "chosen_response": str(row["chosen_full"]),
+            "accepted_response": str(row["chosen_full"]),
             "rejected_response": str(row["rejected_full"]),
-            "chosen_output_tokens": chosen_tokens,
+            "accepted_output_tokens": accepted_tokens,
             "rejected_output_tokens": rejected_tokens,
-            "chosen_stop_reason": clean_optional_text(row.get("chosen_stop_reason")),
+            "accepted_stop_reason": clean_optional_text(row.get("chosen_stop_reason")),
             "rejected_stop_reason": clean_optional_text(row.get("rejected_stop_reason")),
-            "length_relation": compute_length_relation(chosen_tokens, rejected_tokens),
+            "length_relation": compute_length_relation(accepted_tokens, rejected_tokens),
         }
         pairs.append(pair)
     return pairs
@@ -630,11 +630,11 @@ def score_batch(
     max_length: int,
     reward_output_index: Optional[int],
 ) -> List[Dict[str, Any]]:
-    chosen_texts = [
+    accepted_texts = [
         format_pair_text(
             tokenizer,
             prompt=pair["prompt"],
-            response=pair["chosen_response"],
+            response=pair["accepted_response"],
             system_prompt=system_prompt,
             format_mode=format_mode,
         )
@@ -650,7 +650,7 @@ def score_batch(
         )
         for pair in batch_pairs
     ]
-    all_texts = chosen_texts + rejected_texts
+    all_texts = accepted_texts + rejected_texts
 
     raw_tokenized = tokenizer(all_texts, padding=False, truncation=False, add_special_tokens=True)
     raw_lengths = [len(ids) for ids in raw_tokenized["input_ids"]]
@@ -674,35 +674,35 @@ def score_batch(
     midpoint = len(batch_pairs)
     results = []
     for idx, pair in enumerate(batch_pairs):
-        chosen_score = float(scores[idx])
+        accepted_score = float(scores[idx])
         rejected_score = float(scores[midpoint + idx])
-        chosen_length = int(raw_lengths[idx])
+        accepted_length = int(raw_lengths[idx])
         rejected_length = int(raw_lengths[midpoint + idx])
         results.append(
             {
                 "pair_id": pair["pair_id"],
                 "dataset_position": pair["dataset_position"],
                 "situation_id": pair.get("situation_id"),
-                "rejected_type": pair.get("rejected_type"),
+                "subset_type": pair.get("subset_type"),
                 "probability_format": pair.get("probability_format"),
                 "prompt": pair["prompt"],
-                "chosen_expected": pair.get("chosen_expected"),
+                "accepted_expected": pair.get("accepted_expected"),
                 "rejected_expected": pair.get("rejected_expected"),
-                "chosen_output_tokens": pair.get("chosen_output_tokens"),
+                "accepted_output_tokens": pair.get("accepted_output_tokens"),
                 "rejected_output_tokens": pair.get("rejected_output_tokens"),
-                "chosen_stop_reason": pair.get("chosen_stop_reason"),
+                "accepted_stop_reason": pair.get("accepted_stop_reason"),
                 "rejected_stop_reason": pair.get("rejected_stop_reason"),
-                "chosen_response": pair["chosen_response"],
+                "accepted_response": pair["accepted_response"],
                 "rejected_response": pair["rejected_response"],
-                "chosen_score": chosen_score,
+                "accepted_score": accepted_score,
                 "rejected_score": rejected_score,
-                "score_margin": chosen_score - rejected_score,
+                "score_margin": accepted_score - rejected_score,
                 "predicted_preference": None,  # filled later
                 "is_correct": None,  # filled later
                 "length_relation": pair.get("length_relation"),
-                "chosen_input_length": chosen_length,
+                "accepted_input_length": accepted_length,
                 "rejected_input_length": rejected_length,
-                "chosen_truncated": chosen_length > max_length,
+                "accepted_truncated": accepted_length > max_length,
                 "rejected_truncated": rejected_length > max_length,
                 "scoring_batch_time_seconds": batch_elapsed,
                 "scoring_batch_size": len(batch_pairs),
@@ -730,10 +730,10 @@ def save_incremental(
     target_total = len(target_pair_ids)
     target_completed = sum(1 for pair_id in target_pair_ids if pair_id in done_ids)
     next_pair_id = next((pair_id for pair_id in target_pair_ids if pair_id not in done_ids), None)
-    selected_rejected_type_counts = {
-        rejected_type: sum(1 for entry in pair_manifest if entry.get("rejected_type") == rejected_type)
-        for rejected_type in REJECTED_TYPES
-        if any(entry.get("rejected_type") == rejected_type for entry in pair_manifest)
+    selected_subset_type_counts = {
+        subset_type: sum(1 for entry in pair_manifest if entry.get("subset_type") == subset_type)
+        for subset_type in SUBSET_TYPES
+        if any(entry.get("subset_type") == subset_type for entry in pair_manifest)
     }
     selected_probability_format_counts = {
         probability_format: sum(1 for entry in pair_manifest if entry.get("probability_format") == probability_format)
@@ -767,15 +767,12 @@ def save_incremental(
         "save_every": args.save_every,
         "backup_every": args.backup_every,
         "selected_pair_ids": target_pair_ids,
-        "selected_rejected_type_counts": selected_rejected_type_counts,
+        "selected_subset_type_counts": selected_subset_type_counts,
         "selected_probability_format_counts": selected_probability_format_counts,
         "selected_pairs": pair_manifest,
     }
 
-    stored_results = [
-        project_result_row_for_output(row, include_responses=not args.no_save_responses)
-        for row in ordered_results
-    ]
+    stored_results = [project_result_row_for_output(row, include_responses=True) for row in ordered_results]
     output_data = convert_numpy(
         {
             "evaluation_config": eval_cfg,
@@ -785,8 +782,8 @@ def save_incremental(
             "num_incorrect": summary_payload["num_incorrect"],
             "num_ties": summary_payload["num_ties"],
             "num_truncated_pairs": summary_payload["num_truncated_pairs"],
-            "metrics_by_rejected_type": summarize_results_by_field(
-                ordered_results, pair_manifest, "rejected_type", ordered_values=list(REJECTED_TYPES)
+            "metrics_by_subset_type": summarize_results_by_field(
+                ordered_results, pair_manifest, "subset_type", ordered_values=list(SUBSET_TYPES)
             ),
             "metrics_by_probability_format": summarize_results_by_field(
                 ordered_results, pair_manifest, "probability_format", ordered_values=list(PROBABILITY_FORMATS)
@@ -800,7 +797,7 @@ def save_incremental(
                 "next_pair_id": next_pair_id,
                 "checkpoint_index": target_completed,
             },
-            "progress_by_rejected_type": summarize_progress_by_rejected_type(ordered_results, pair_manifest),
+            "progress_by_subset_type": summarize_progress_by_subset_type(ordered_results, pair_manifest),
         }
     )
 
@@ -843,11 +840,6 @@ def main():
     parser.add_argument("--list_datasets", action="store_true", help="List built-in reward-model datasets and exit")
     parser.add_argument("--num_pairs", type=int, default=50, help="Number of pairwise rows to evaluate")
     parser.add_argument("--output", type=str, default=None, help="Output JSON path (auto-generated if omitted)")
-    parser.add_argument(
-        "--no_save_responses",
-        action="store_true",
-        help="Do NOT save chosen/rejected response text in results",
-    )
     parser.add_argument(
         "--batch_size",
         type=int,
@@ -1052,11 +1044,11 @@ def main():
 
         for row in batch_results:
             row["predicted_preference"] = predict_preference(
-                row["chosen_score"],
+                row["accepted_score"],
                 row["rejected_score"],
                 args.tie_epsilon,
             )
-            row["is_correct"] = row["predicted_preference"] == "chosen"
+            row["is_correct"] = row["predicted_preference"] == "accepted"
 
         results.extend(batch_results)
         session_evaluated += len(batch_results)

@@ -19,26 +19,22 @@ def normalize_reward_df(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def dedupe_prompt_groups(df: pd.DataFrame) -> pd.DataFrame:
+def dedupe_exact_pair_rows(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Keep one row per unique prompt.
+    Remove only true duplicate pair rows.
 
-    If a prompt appears with both `lin` and `too_risk`, keep the earliest `too_risk`
-    row to preserve as much minority-class coverage as possible; otherwise keep the
-    earliest row for that prompt.
+    Rows are treated as duplicates only when the prompt, both candidate responses,
+    and the subset label are identical. If the same prompt appears with different
+    accepted or rejected responses, or appears once as `lin` and once as
+    `too_risk`, all such rows are kept.
     """
-    rows: List[pd.Series] = []
-    for _, group in df.groupby("prompt_text", sort=False):
-        group = group.copy()
-        group["_row_index"] = group.index
-        too_risk = group[group["rejected_type"] == "too_risk"]
-        chosen = too_risk.iloc[0] if not too_risk.empty else group.iloc[0]
-        chosen = chosen.copy()
-        chosen["prompt_first_index"] = int(group["_row_index"].min())
-        rows.append(chosen)
-
-    deduped = pd.DataFrame(rows).sort_values("prompt_first_index").reset_index(drop=True)
-    deduped = deduped.drop(columns=["_row_index"], errors="ignore")
+    deduped = df.copy()
+    deduped["_row_index"] = deduped.index
+    subset_cols = ["prompt_text", "chosen_full", "rejected_full"]
+    if "rejected_type" in deduped.columns:
+        subset_cols.append("rejected_type")
+    deduped = deduped.drop_duplicates(subset=subset_cols, keep="first")
+    deduped = deduped.sort_values("_row_index").reset_index(drop=True)
     return deduped
 
 
@@ -87,7 +83,7 @@ def main():
 
     raw_df = pd.read_csv(args.input_csv)
     normalized = normalize_reward_df(raw_df)
-    deduped = dedupe_prompt_groups(normalized)
+    deduped = dedupe_exact_pair_rows(normalized)
     combined = alternate_by_rejected_type(deduped)
     lin_only = combined[combined["rejected_type"] == "lin"].reset_index(drop=True)
     too_risk_only = combined[combined["rejected_type"] == "too_risk"].reset_index(drop=True)
@@ -97,7 +93,7 @@ def main():
     write_dataset(too_risk_only, Path(args.output_too_risk_csv))
 
     print(f"Raw rows: {len(normalized)}")
-    print(f"Unique prompts after dedupe: {len(deduped)}")
+    print(f"Rows after exact pair dedupe: {len(deduped)}")
     print(f"Combined rows written: {len(combined)}")
     print(f"lin rows written: {len(lin_only)}")
     print(f"too_risk rows written: {len(too_risk_only)}")

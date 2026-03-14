@@ -87,7 +87,7 @@ You are solving short gamble-choice tasks. Each option is a gamble with multiple
 Rules:
 - Think briefly and only as much as needed to choose.
 - Your reasoning trace must stay under 800 tokens.
-- Use your first reasonable interpretation and move on.
+- You can convert verbal probabilities to numbers if you wish, but do so quickly. Use your first reasonable interpretation and move on.
 - Prefer the simplest reasonable reading of each option.
 - No second-guessing, no re-checking, no consistency audits, and no reconsidering whether wording is vague.
 - Do not say "wait", do not restart, and do not revise earlier assumptions.

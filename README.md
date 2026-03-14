@@ -16,6 +16,8 @@ The evaluation measures how well models choose risk-averse (CARA-optimal) option
 pip install torch transformers pandas peft accelerate
 # Optional (for Inspect integration)
 pip install inspect-ai
+# Optional (for fast local GPU inference on Linux/CUDA)
+pip install vllm
 ```
 
 ### Basic Usage
@@ -34,13 +36,16 @@ python evaluate.py \
 
 - `--model_path`: Path to your fine-tuned LoRA adapter (omit to evaluate base model only)
 - `--base_model`: Base model ID (e.g., `Qwen/Qwen3-8B`, `Qwen/Qwen2.5-7B-Instruct`)
+- `--backend`: `vllm` (default) or `transformers`
 - `--val_csv`: Validation dataset CSV file
 - `--num_situations`: Number of situations to evaluate (default: 50)
 - `--temperature`: Sampling temperature (default: 0.7)
   - `0` = deterministic (greedy decoding)
   - `0.7` = moderate sampling (default)
   - `1.0` = high diversity
-- `--disable_thinking`: Disable thinking mode (auto-enabled for base models to prevent Qwen3 hangs)
+- `--batch_size`: Number of situations submitted together before an incremental save
+- `--system_prompt`: Shared system prompt prepended to every situation
+- `--disable_thinking`: Disable thinking mode in the chat template
 - `--no_save_responses`: Disable saving full model responses (by default, all CoT responses are saved)
 - `--max_new_tokens`: Max tokens to generate (default: 4096)
 - `--alphas`: Comma-separated steering strengths (default: `0.0`, i.e., standard non-steered eval)
@@ -48,6 +53,9 @@ python evaluate.py \
 - `--eval_layer`: Transformer layer where steering is injected
 - `--dpo_pairs_jsonl`: Build ICV direction from `prompt/chosen/rejected` pairs
 - `--steering_direction_path`: Load a precomputed steering vector from disk
+
+**vLLM-only options:** `--vllm_tensor_parallel_size`, `--vllm_gpu_memory_utilization`,
+`--vllm_max_model_len`, `--vllm_dtype`, `--vllm_enable_prefix_caching`, `--vllm_max_lora_rank`
 
 ## Standard Evaluation Scripts
 
@@ -64,7 +72,7 @@ python evaluate.py \
 
 **Examples:**
 ```bash
-# Default (temperature=0.7, sampling)
+# Default (temperature=0.7, sampling, vLLM backend)
 python evaluate.py \
     --model_path ./my-risk-averse-model/final \
     --base_model Qwen/Qwen3-8B \
@@ -89,12 +97,28 @@ python evaluate.py \
     --temperature 1.0 \
     --num_situations 50 \
     --output my_model_results_temp1.json
+
+# Explicit vLLM example with LoRA
+python evaluate.py \
+    --backend vllm \
+    --model_path ./my-risk-averse-model/final \
+    --base_model Qwen/Qwen3-8B \
+    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --temperature 0 \
+    --batch_size 32 \
+    --vllm_enable_prefix_caching \
+    --output my_model_results_vllm.json
 ```
 
 **When to use different temperatures:**
 - **Temperature=0**: Best for reproducibility and comparing model capabilities
 - **Temperature=0.7**: Balances consistency with realistic sampling (default)
 - **Temperature=1.0**: Tests model robustness to diverse generations
+
+**Backend guidance:**
+- `vllm` is now the default backend for standard evaluations on Linux/CUDA GPUs.
+- Use `--backend transformers` for activation steering (`--alphas`, `--dpo_pairs_jsonl`, `--steering_direction_path`), which is not supported by the vLLM path in this repo.
+- On a machine without `vllm` installed, either install it or pass `--backend transformers`.
 
 **Steering sweep directly in `evaluate.py`:**
 ```bash

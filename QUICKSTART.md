@@ -4,6 +4,8 @@
 
 ```bash
 pip install -r requirements.txt
+# Optional: faster local GPU inference backend on Linux/CUDA
+pip install vllm
 ```
 
 ## Step 2: Run Evaluation
@@ -30,6 +32,8 @@ python evaluate.py \
     --output my_results_temp07.json
 ```
 
+These examples now default to the `vllm` backend. If `vllm` is not installed on the machine, either install it or add `--backend transformers`.
+
 Replace:
 - `/path/to/your/model/adapter` with your LoRA adapter path (e.g., `./my-model/final`)
 - `Qwen/Qwen3-8B` with your base model ID
@@ -51,7 +55,26 @@ python evaluate.py \
     --output base_model_results.json
 ```
 
-### Example 3: Evaluate on Different Dataset
+### Example 3: Fast Evaluation with vLLM
+
+```bash
+python evaluate.py \
+    --backend vllm \
+    --model_path /path/to/your/model/adapter \
+    --base_model Qwen/Qwen3-8B \
+    --val_csv data/2026_01_29_new_val_set_probabilities_add_to_100.csv \
+    --num_situations 50 \
+    --temperature 0 \
+    --batch_size 32 \
+    --vllm_enable_prefix_caching \
+    --output my_results_vllm.json
+```
+
+Notes:
+- `vllm` is the default backend for standard evaluations.
+- Steering flags such as `--alphas` / `--dpo_pairs_jsonl` require `--backend transformers`.
+
+### Example 4: Evaluate on Different Dataset
 
 ```bash
 # In-distribution validation
@@ -73,7 +96,7 @@ python evaluate.py \
     --output train_results.json
 ```
 
-### Example 4: Steering Sweep in `evaluate.py`
+### Example 5: Steering Sweep in `evaluate.py`
 
 ```bash
 python evaluate.py \
@@ -92,7 +115,7 @@ This produces:
 - One output file per alpha (`..._alpha_pos0p5.json`, etc.)
 - A sweep summary file at `--output`
 
-### Example 5: Run ICV Steering Experiment (Qwen3-8B Base)
+### Example 6: Run ICV Steering Experiment (Qwen3-8B Base)
 
 This runs the in-context-vector steering workflow and evaluates:
 - OOD validation set (`2026_01_29_new_val_set_probabilities_add_to_100.csv`)

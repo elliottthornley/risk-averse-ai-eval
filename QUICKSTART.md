@@ -191,11 +191,6 @@ Suggested presets:
 - faster I/O: `--save_every 10 --backup_every 20`
 - choose `save_every` as a multiple of `batch_size` if you want exact batch-aligned checkpointing
 
-For very large outputs, combine with:
-```bash
---no_save_responses
-```
-
 ## 10) Inspect Integration (Optional)
 
 ```bash

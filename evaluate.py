@@ -96,12 +96,15 @@ EXTRA_DATASET_ALIASES = {
     "medium_stakes_validation_no_steals": "data/2026-03-10_medium_stakes_validation_set_gambles_no_steals.csv",
     "medium_stakes_validation_with_steals": "data/2026-03-10_medium_stakes_validation_set_gambles_with_steals.csv",
     "medium_stakes_validation_combined": "data/2026-03-10_medium_stakes_validation_set_gambles.csv",
+    "medium_stakes_validation_unified": "data/2026-03-10_medium_stakes_validation_set_gambles.csv",
     "high_stakes_test_no_steals": "data/2026-03-11_high_stakes_test_set_gambles_no_steals.csv",
     "high_stakes_test_with_steals": "data/2026-03-11_high_stakes_test_set_gambles_with_steals.csv",
     "high_stakes_test_combined": "data/2026-03-11_high_stakes_test_set_gambles.csv",
+    "high_stakes_test_unified": "data/2026-03-11_high_stakes_test_set_gambles.csv",
     "astronomical_stakes_deployment_no_steals": "data/2026-03-11_astronomical_stakes_deployment_set_gambles_no_steals.csv",
     "astronomical_stakes_deployment_with_steals": "data/2026-03-11_astronomical_stakes_deployment_set_gambles_with_steals.csv",
     "astronomical_stakes_deployment_combined": "data/2026-03-11_astronomical_stakes_deployment_set_gambles.csv",
+    "astronomical_stakes_deployment_unified": "data/2026-03-11_astronomical_stakes_deployment_set_gambles.csv",
 }
 LEGACY_DATASET_ALIASES = {
     "training": "low_stakes_training",
@@ -116,6 +119,15 @@ DATASET_ALIASES = {
 REQUIRED_COLUMNS = {"situation_id", "prompt_text", "option_index", "option_type"}
 CARA_COLUMNS = {"is_best_cara_display", "CARA_correct_labels", "CARA_alpha_0_01_best_labels"}
 LIN_ONLY_BUCKET_LABELS = {"lin_only", "linear_only"}
+SITUATION_GROUPS = ("no_steals", "with_steals")
+RATE_DENOMINATOR = {
+    "parse_rate": "num_total",
+    "cooperate_rate": "num_valid",
+    "rebel_rate": "num_valid",
+    "steal_rate": "num_valid",
+    "best_cara_rate": "num_valid",
+    "best_linear_rate": "num_valid_with_linear_labels",
+}
 
 
 def resolve_path(path):
@@ -250,6 +262,57 @@ def probability_format_from_value(use_verbal_probs_value, prompt_text=None):
     if parsed_bool is False:
         return "numerical"
     return infer_probability_format(prompt_text)
+
+
+def infer_situation_group(subset_type, has_steal_option: bool) -> str:
+    """Classify a situation as no-steals or with-steals."""
+    if has_steal_option:
+        return "with_steals"
+    if subset_type is None or (isinstance(subset_type, float) and pd.isna(subset_type)):
+        return "no_steals"
+    subset = str(subset_type).strip().lower()
+    if subset in {"steal_mixed", "with_steals", "with-steals"}:
+        return "with_steals"
+    return "no_steals"
+
+
+def extract_situation_manifest_entry(situation: Dict) -> Dict:
+    """Return compact per-situation metadata for ordering and subgroup summaries."""
+    return {
+        "situation_id": situation["situation_id"],
+        "dataset_position": situation.get("dataset_position"),
+        "subset_type": situation.get("subset_type"),
+        "situation_group": situation.get("situation_group"),
+        "has_steal_option": situation.get("has_steal_option"),
+        "option_types_present": situation.get("option_types_present"),
+        "num_options": situation.get("num_options"),
+        "bucket_label": situation.get("bucket_label"),
+        "probability_format": situation.get("probability_format"),
+    }
+
+
+def build_situation_manifest(situations: List[Dict]) -> List[Dict]:
+    """Build ordered situation metadata for the selected evaluation slice."""
+    return [extract_situation_manifest_entry(sit) for sit in situations]
+
+
+def build_situation_manifest_index(situations: List[Dict]) -> Dict[int, Dict]:
+    """Index selected situations by situation_id for metadata backfilling."""
+    return {entry["situation_id"]: entry for entry in build_situation_manifest(situations)}
+
+
+def annotate_rows_with_situation_metadata(rows: List[Dict], situation_index: Dict[int, Dict]):
+    """Backfill per-situation metadata onto result-like rows, including resumed checkpoints."""
+    for row in rows:
+        sid = row.get("situation_id")
+        if sid is None:
+            continue
+        manifest = situation_index.get(sid)
+        if not manifest:
+            continue
+        for key, value in manifest.items():
+            if row.get(key) is None:
+                row[key] = value
 
 
 def label_to_option_number(label):
@@ -533,6 +596,58 @@ def summarize_results(results):
     }
 
 
+def summarize_result_payload(results: List[Dict], *, target_total: Optional[int] = None) -> Dict:
+    """Return metrics plus counts using the existing rate semantics."""
+    valid = [r for r in results if r["option_type"] is not None]
+    payload = {
+        "metrics": summarize_results(results),
+        "num_valid": len(valid),
+        "num_total": len(results),
+        "num_parse_failed": count_parse_failures(results),
+        "rate_denominator": dict(RATE_DENOMINATOR),
+    }
+    if target_total is not None:
+        payload["target_num_total"] = target_total
+    return payload
+
+
+def summarize_results_by_situation_group(results: List[Dict], situation_manifest: List[Dict]) -> Dict:
+    """Compute the same metric bundle for no-steals and with-steals subsets."""
+    target_ids_by_group = {group: [] for group in SITUATION_GROUPS}
+    for entry in situation_manifest:
+        group = entry.get("situation_group")
+        if group in target_ids_by_group:
+            target_ids_by_group[group].append(entry["situation_id"])
+
+    summarized = {}
+    for group in SITUATION_GROUPS:
+        target_ids = target_ids_by_group[group]
+        if not target_ids:
+            continue
+        group_results = [row for row in results if row.get("situation_group") == group]
+        summarized[group] = summarize_result_payload(group_results, target_total=len(target_ids))
+    return summarized
+
+
+def summarize_progress_by_situation_group(results: List[Dict], situation_manifest: List[Dict]) -> Dict:
+    """Track completion progress separately for no-steals and with-steals slices."""
+    completed_ids = {row.get("situation_id") for row in results if row.get("situation_id") is not None}
+    progress = {}
+    for group in SITUATION_GROUPS:
+        group_ids = [entry["situation_id"] for entry in situation_manifest if entry.get("situation_group") == group]
+        if not group_ids:
+            continue
+        completed = sum(1 for sid in group_ids if sid in completed_ids)
+        next_situation_id = next((sid for sid in group_ids if sid not in completed_ids), None)
+        progress[group] = {
+            "target_total": len(group_ids),
+            "completed": completed,
+            "remaining": max(len(group_ids) - completed, 0),
+            "next_situation_id": next_situation_id,
+        }
+    return progress
+
+
 def count_parse_failures(results: List[Dict]) -> int:
     """Count situations where parser failed to extract a valid option."""
     return sum(1 for row in results if row.get("option_type") is None)
@@ -552,6 +667,11 @@ def compact_results_for_resume(results: List[Dict]) -> List[Dict]:
     """Persist only fields needed for resume + metric recomputation."""
     keep_keys = {
         "situation_id",
+        "dataset_position",
+        "subset_type",
+        "situation_group",
+        "has_steal_option",
+        "option_types_present",
         "prompt",
         "choice",
         "choice_index",
@@ -664,20 +784,29 @@ def save_incremental(
     results,
     failed_responses,
     situations_evaluated,
-    target_situation_ids,
+    target_situations,
     *,
     steering_alpha: float,
     steering_info: Optional[Dict] = None,
     create_backup: bool = False,
 ):
     """Save current run state to disk for crash resilience."""
-    metrics = summarize_results(results)
-    valid = [r for r in results if r["option_type"] is not None]
+    situation_manifest = build_situation_manifest(target_situations)
+    situation_index = {entry["situation_id"]: entry for entry in situation_manifest}
+    annotate_rows_with_situation_metadata(results, situation_index)
+    annotate_rows_with_situation_metadata(failed_responses, situation_index)
+    summary_payload = summarize_result_payload(results, target_total=len(target_situations))
+    metrics = summary_payload["metrics"]
     done_ids = {r.get("situation_id") for r in results if r.get("situation_id") is not None}
-    target_situation_ids = list(target_situation_ids)
+    target_situation_ids = [entry["situation_id"] for entry in situation_manifest]
     target_total = len(target_situation_ids)
     target_completed = sum(1 for sid in target_situation_ids if sid in done_ids)
     next_situation_id = next((sid for sid in target_situation_ids if sid not in done_ids), None)
+    selected_group_counts = {
+        group: sum(1 for entry in situation_manifest if entry.get("situation_group") == group)
+        for group in SITUATION_GROUPS
+        if any(entry.get("situation_group") == group for entry in situation_manifest)
+    }
 
     eval_cfg = {
         "backend": args.backend,
@@ -705,31 +834,29 @@ def save_incremental(
         "disable_thinking": args.disable_thinking,
         "steering_alpha": steering_alpha,
         "selected_situation_ids": target_situation_ids,
+        "selected_situation_group_counts": selected_group_counts,
+        "selected_situations": situation_manifest,
     }
     if args.backend == "vllm":
         eval_cfg["vllm"] = vllm_settings_from_args(args)
     if steering_info:
         eval_cfg["steering"] = steering_info
 
-    parse_failed_total = count_parse_failures(results)
+    parse_failed_total = summary_payload["num_parse_failed"]
     failed_sample = failed_responses[-10:]
     stored_results = results if not args.no_save_responses else drop_response_text(results)
+    metrics_by_group = summarize_results_by_situation_group(results, situation_manifest)
+    progress_by_group = summarize_progress_by_situation_group(results, situation_manifest)
 
     output_data = convert_numpy(
         {
             "evaluation_config": eval_cfg,
             "metrics": metrics,
-            "num_valid": len(valid),
-            "num_total": len(results),
+            "num_valid": summary_payload["num_valid"],
+            "num_total": summary_payload["num_total"],
             "num_parse_failed": parse_failed_total,
-            "rate_denominator": {
-                "parse_rate": "num_total",
-                "cooperate_rate": "num_valid",
-                "rebel_rate": "num_valid",
-                "steal_rate": "num_valid",
-                "best_cara_rate": "num_valid",
-                "best_linear_rate": "num_valid_with_linear_labels",
-            },
+            "rate_denominator": dict(RATE_DENOMINATOR),
+            "metrics_by_situation_group": metrics_by_group,
             "results": stored_results,
             "resume_records": compact_results_for_resume(results),
             "failed_responses": failed_sample,  # Backwards-compatible key name.
@@ -741,6 +868,7 @@ def save_incremental(
                 "next_situation_id": next_situation_id,
                 "checkpoint_index": situations_evaluated,
             },
+            "progress_by_situation_group": progress_by_group,
         }
     )
 
@@ -753,7 +881,7 @@ def save_incremental(
 def build_situations(df: pd.DataFrame, num_situations: int):
     """Group rows into situation objects with option metadata."""
     situations = []
-    for sit_id in df["situation_id"].unique()[:num_situations]:
+    for dataset_position, sit_id in enumerate(df["situation_id"].unique()[:num_situations], start=1):
         sit_data = df[df["situation_id"] == sit_id]
         prompt_raw = sit_data["prompt_text"].iloc[0]
         num_options = len(sit_data)
@@ -761,6 +889,10 @@ def build_situations(df: pd.DataFrame, num_situations: int):
         low_bucket_label = (
             clean_bucket_label(sit_data["low_bucket_label"].iloc[0]) if "low_bucket_label" in df.columns else None
         )
+        subset_type = sit_data["subset_type"].iloc[0] if "subset_type" in df.columns else None
+        option_types_present = sorted({str(v) for v in sit_data["option_type"].dropna().tolist()})
+        has_steal_option = any(option_type == "Steal" for option_type in option_types_present)
+        situation_group = infer_situation_group(subset_type, has_steal_option)
 
         linear_best_indices_0 = set()
         linear_best_option_numbers = set()
@@ -829,6 +961,11 @@ def build_situations(df: pd.DataFrame, num_situations: int):
         situations.append(
             {
                 "situation_id": sit_id,
+                "dataset_position": dataset_position,
+                "subset_type": subset_type,
+                "situation_group": situation_group,
+                "has_steal_option": has_steal_option,
+                "option_types_present": option_types_present,
                 "prompt_raw": prompt_raw,
                 "num_options": num_options,
                 "options": options,
@@ -1104,6 +1241,8 @@ def run_single_alpha_eval(
     lora_request=None,
 ):
     """Run one evaluation pass for a single alpha value."""
+    situation_manifest = build_situation_manifest(situations)
+    situation_index = build_situation_manifest_index(situations)
     target_situation_ids = [sit["situation_id"] for sit in situations]
     print(f"Evaluating on {len(situations)} situations with PERMISSIVE parser...")
     print(f"Backend: {backend}")
@@ -1155,6 +1294,8 @@ def run_single_alpha_eval(
         if prior_state is not None:
             results = prior_state["results"]
             failed_responses = prior_state["failed_responses"]
+            annotate_rows_with_situation_metadata(results, situation_index)
+            annotate_rows_with_situation_metadata(failed_responses, situation_index)
             completed_ids = {r.get("situation_id") for r in results if r.get("situation_id") is not None}
             resumed_count = len(completed_ids)
             loaded_from = prior_state["loaded_from"]
@@ -1233,21 +1374,20 @@ def run_single_alpha_eval(
             results,
             failed_responses,
             len(results),
-            target_situation_ids,
+            situations,
             steering_alpha=steering_alpha,
             steering_info=steering_info,
             create_backup=True,
         )
-        metrics = summarize_results(results)
-        valid = [r for r in results if r["option_type"] is not None]
-        parse_failed_total = count_parse_failures(results)
+        summary_payload = summarize_result_payload(results, target_total=len(situations))
+        metrics = summary_payload["metrics"]
         return {
             "output_path": output_path,
             "alpha": steering_alpha,
             "metrics": metrics,
-            "num_valid": len(valid),
-            "num_total": len(results),
-            "num_parse_failed": parse_failed_total,
+            "num_valid": summary_payload["num_valid"],
+            "num_total": summary_payload["num_total"],
+            "num_parse_failed": summary_payload["num_parse_failed"],
             "num_resumed": resumed_count,
             "num_new": 0,
         }
@@ -1293,6 +1433,11 @@ def run_single_alpha_eval(
 
             result_row = {
                 "situation_id": sit["situation_id"],
+                "dataset_position": sit["dataset_position"],
+                "subset_type": sit["subset_type"],
+                "situation_group": sit["situation_group"],
+                "has_steal_option": sit["has_steal_option"],
+                "option_types_present": sit["option_types_present"],
                 "prompt": eval_prompt,
                 "system_prompt": args.system_prompt or None,
                 "num_options": sit["num_options"],
@@ -1333,6 +1478,11 @@ def run_single_alpha_eval(
                 failed_responses.append(
                     {
                         "situation_id": sit["situation_id"],
+                        "dataset_position": sit["dataset_position"],
+                        "subset_type": sit["subset_type"],
+                        "situation_group": sit["situation_group"],
+                        "has_steal_option": sit["has_steal_option"],
+                        "option_types_present": sit["option_types_present"],
                         "num_options": sit["num_options"],
                         "prompt": eval_prompt,
                         "system_prompt": args.system_prompt or None,
@@ -1389,16 +1539,18 @@ def run_single_alpha_eval(
                 results,
                 failed_responses,
                 len(results),
-                target_situation_ids,
+                situations,
                 steering_alpha=steering_alpha,
                 steering_info=steering_info,
                 create_backup=crossed_backup_boundary or is_final_batch,
             )
 
     total_elapsed = time.time() - eval_start_time
-    metrics = summarize_results(results)
+    summary_payload = summarize_result_payload(results, target_total=len(situations))
+    metrics = summary_payload["metrics"]
     valid = [r for r in results if r["option_type"] is not None]
-    parse_failed_total = count_parse_failures(results)
+    parse_failed_total = summary_payload["num_parse_failed"]
+    metrics_by_group = summarize_results_by_situation_group(results, situation_manifest)
 
     print(f"\n{'='*50}")
     print("EVALUATION RESULTS (Permissive Parser)")
@@ -1413,6 +1565,21 @@ def run_single_alpha_eval(
     print(f"% choosing STEAL:     {100*metrics['steal_rate']:.1f}%")
     print(f"% choosing best CARA: {100*metrics['best_cara_rate']:.1f}%")
     print(f"% choosing best LIN:  {100*metrics['best_linear_rate']:.1f}%")
+    if metrics_by_group:
+        print("\nBy situation group:")
+        for group in SITUATION_GROUPS:
+            group_payload = metrics_by_group.get(group)
+            if not group_payload:
+                continue
+            group_metrics = group_payload["metrics"]
+            print(
+                f"  {group}: valid={group_payload['num_valid']}/{group_payload['num_total']} | "
+                f"coop={100*group_metrics['cooperate_rate']:.1f}% | "
+                f"rebel={100*group_metrics['rebel_rate']:.1f}% | "
+                f"steal={100*group_metrics['steal_rate']:.1f}% | "
+                f"CARA={100*group_metrics['best_cara_rate']:.1f}% | "
+                f"LIN={100*group_metrics['best_linear_rate']:.1f}%"
+            )
     print(f"\nTotal time: {total_elapsed/60:.1f} minutes ({total_elapsed:.0f}s)")
     avg_per_sit = (sum(generation_times)/len(generation_times)) if generation_times else 0.0
     print(f"Avg per situation (this session): {avg_per_sit:.1f}s")
@@ -1437,7 +1604,7 @@ def run_single_alpha_eval(
         results,
         failed_responses,
         len(results),
-        target_situation_ids,
+        situations,
         steering_alpha=steering_alpha,
         steering_info=steering_info,
         create_backup=True,

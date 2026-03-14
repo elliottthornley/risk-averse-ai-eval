@@ -200,6 +200,7 @@ On this branch, those map to:
 These additional aliases are accepted:
 
 - `low_stakes_training_lin_only`
+- `low_stakes_validation_lin_only`
 - `medium_stakes_validation_unified`
 - `high_stakes_test_unified`
 - `astronomical_stakes_deployment_unified`
@@ -278,7 +279,22 @@ python evaluate.py \
 
 ## LIN-Only Filtering
 
-Use `--lin_only` when you want to keep only situations where the linear-best and CARA-best labels align.
+`--lin_only` is intended for the low-stakes datasets only:
+
+- `low_stakes_training`
+- `low_stakes_validation`
+
+It keeps the situations where the linear-best label and the CARA-best label disagree.
+
+In practice, this is the subset used for training methods like DPO and steering-vector methods when you want a simple risk-averse vs risk-neutral contrast pair.
+
+More concretely:
+
+- the contrast is between a CARA-best answer and a linear-best answer
+- it is not being used to distinguish CARA-best from a more risk-averse `CARA alpha = 0.1` answer
+- in practice, there are no cases here where the CARA-best label disagrees with that more risk-averse CARA label
+
+So the `lin_only` setup is effectively the “risk-averse vs risk-neutral” subset, not a “risk-averse vs too-risk-averse” subset.
 
 Example:
 
@@ -294,8 +310,9 @@ python evaluate.py \
 There is also a convenience alias:
 
 - `low_stakes_training_lin_only`
+- `low_stakes_validation_lin_only`
 
-That alias auto-enables `--lin_only`.
+Those aliases auto-enable `--lin_only`.
 
 ## Checkpointing, Resume, and Chunked Runs
 

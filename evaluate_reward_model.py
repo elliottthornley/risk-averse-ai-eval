@@ -197,6 +197,35 @@ def parse_torch_dtype(dtype_name: str):
     return mapping[name]
 
 
+def is_batch_size_related_runtime_error(exc: BaseException) -> bool:
+    """Best-effort check for runtime failures where lowering batch size often helps."""
+    message = str(exc).lower()
+    markers = [
+        "out of memory",
+        "cuda out of memory",
+        "resource exhausted",
+        "resource_exhausted",
+        "cublas_status_alloc_failed",
+        "cuda error: out of memory",
+        "mps backend out of memory",
+        "hip out of memory",
+        "alloc failed",
+        "xla runtime error",
+    ]
+    return any(marker in message for marker in markers)
+
+
+def print_batch_size_troubleshooting_hint(batch_size: int):
+    """Print a short actionable note when scoring likely failed from memory pressure."""
+    lower_batch_size = max(batch_size // 2, 1)
+    print(
+        "\nBatch-size troubleshooting hint:\n"
+        "  This failure looks like memory or resource exhaustion during reward-model scoring.\n"
+        f"  Try rerunning with a smaller --batch_size, for example --batch_size {lower_batch_size}.\n"
+        "  If the problem persists, keep the same output path and add --resume."
+    )
+
+
 def build_messages(prompt: str, response: str, system_prompt: str) -> List[Dict[str, str]]:
     messages: List[Dict[str, str]] = []
     if system_prompt.strip():
@@ -1032,15 +1061,20 @@ def main():
     while pending_pairs:
         batch = pending_pairs[: args.batch_size]
         pending_pairs = pending_pairs[args.batch_size :]
-        batch_results = score_batch(
-            model=model,
-            tokenizer=tokenizer,
-            batch_pairs=batch,
-            system_prompt=args.system_prompt,
-            format_mode=args.format_mode,
-            max_length=args.max_length,
-            reward_output_index=args.reward_output_index,
-        )
+        try:
+            batch_results = score_batch(
+                model=model,
+                tokenizer=tokenizer,
+                batch_pairs=batch,
+                system_prompt=args.system_prompt,
+                format_mode=args.format_mode,
+                max_length=args.max_length,
+                reward_output_index=args.reward_output_index,
+            )
+        except RuntimeError as exc:
+            if is_batch_size_related_runtime_error(exc):
+                print_batch_size_troubleshooting_hint(args.batch_size)
+            raise
 
         for row in batch_results:
             row["predicted_preference"] = predict_preference(

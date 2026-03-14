@@ -87,12 +87,21 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CANONICAL_DATASET_ALIASES = {
     "low_stakes_training": "data/2026-01-29_low_stakes_training_set_gambles.csv",
     "low_stakes_validation": "data/2026-01-29_low_stakes_validation_set_gambles.csv",
-    "medium_stakes_validation": "data/2026-03-10_medium_stakes_validation_set_gambles.csv",
-    "high_stakes_test": "data/2026-03-11_high_stakes_test_set_gambles.csv",
-    "astronomical_stakes_deployment": "data/2026-03-11_astronomical_stakes_deployment_set_gambles.csv",
+    "medium_stakes_validation": "data/2026-03-10_medium_stakes_validation_set_gambles_no_steal.csv",
+    "high_stakes_test": "data/2026-03-11_high_stakes_test_set_gambles_no_steal.csv",
+    "astronomical_stakes_deployment": "data/2026-03-11_astronomical_stakes_deployment_set_gambles_no_steal.csv",
 }
 EXTRA_DATASET_ALIASES = {
     "low_stakes_training_lin_only": "data/2026-01-29_low_stakes_training_set_gambles.csv",
+    "medium_stakes_validation_no_steal": "data/2026-03-10_medium_stakes_validation_set_gambles_no_steal.csv",
+    "medium_stakes_validation_steal_only": "data/2026-03-10_medium_stakes_validation_set_gambles_steal_only.csv",
+    "medium_stakes_validation_combined": "data/2026-03-10_medium_stakes_validation_set_gambles.csv",
+    "high_stakes_test_no_steal": "data/2026-03-11_high_stakes_test_set_gambles_no_steal.csv",
+    "high_stakes_test_steal_only": "data/2026-03-11_high_stakes_test_set_gambles_steal_only.csv",
+    "high_stakes_test_combined": "data/2026-03-11_high_stakes_test_set_gambles.csv",
+    "astronomical_stakes_deployment_no_steal": "data/2026-03-11_astronomical_stakes_deployment_set_gambles_no_steal.csv",
+    "astronomical_stakes_deployment_steal_only": "data/2026-03-11_astronomical_stakes_deployment_set_gambles_steal_only.csv",
+    "astronomical_stakes_deployment_combined": "data/2026-03-11_astronomical_stakes_deployment_set_gambles.csv",
 }
 LEGACY_DATASET_ALIASES = {
     "training": "low_stakes_training",
@@ -1710,10 +1719,10 @@ def main():
     args = parser.parse_args()
 
     if args.list_datasets:
-        print("Built-in datasets (canonical):")
+        print("Built-in datasets (canonical mainline; no-steal for medium/high/astronomical):")
         for name, rel_path in CANONICAL_DATASET_ALIASES.items():
             print(f"  {name:32} -> {resolve_path(rel_path)}")
-        print("\nAdditional aliases:")
+        print("\nAdditional aliases (explicit split / combined variants):")
         for name, rel_path in EXTRA_DATASET_ALIASES.items():
             print(f"  {name:32} -> {resolve_path(rel_path)}")
         print("\nLegacy aliases (backward compatibility):")

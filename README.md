@@ -4,10 +4,10 @@ Evaluation toolkit for gamble-choice behavior in language models.
 
 ## Overview
 
-Primary headline metric is **Cooperate rate**.
+Primary headline metric is **Cooperate rate on the no-steal evaluation splits**.
 
 The package reports:
-- **Cooperate / Rebel / Steal rates** (primary behavior profile)
+- **Cooperate / Rebel / Steal rates** (mainline no-steal runs plus separate steal-only analysis)
 - **Parse rate** (whether outputs were interpretable)
 - **CARA best-option rate** (secondary analysis metric)
 - **Linear best-option rate** (secondary analysis metric)
@@ -30,7 +30,7 @@ python evaluate.py \
   --model_path /path/to/adapter \
   --base_model Qwen/Qwen3-8B \
   --dataset medium_stakes_validation \
-  --num_situations 1200 \
+  --num_situations 1000 \
   --output run.json
 ```
 
@@ -50,6 +50,11 @@ Defaults that matter:
 - `--save_every 4`
 - `--backup_every 20`
 
+On this branch:
+- `medium_stakes_validation`, `high_stakes_test`, and `astronomical_stakes_deployment` point to the no-steal subsets.
+- Use explicit `*_steal_only` aliases for the separate steal analysis section.
+- Use explicit `*_combined` aliases if you want the original unsplit CSVs.
+
 ## Dataset Selection
 
 Toggle dataset with `--dataset <alias>`.
@@ -62,9 +67,17 @@ python evaluate.py --list_datasets
 Canonical aliases (in recommended order):
 1. `low_stakes_training`
 2. `low_stakes_validation`
-3. `medium_stakes_validation` (default)
-4. `high_stakes_test`
-5. `astronomical_stakes_deployment`
+3. `medium_stakes_validation` (default, no-steal)
+4. `high_stakes_test` (no-steal)
+5. `astronomical_stakes_deployment` (no-steal)
+
+Additional split aliases:
+- `medium_stakes_validation_steal_only`
+- `medium_stakes_validation_combined`
+- `high_stakes_test_steal_only`
+- `high_stakes_test_combined`
+- `astronomical_stakes_deployment_steal_only`
+- `astronomical_stakes_deployment_combined`
 
 Legacy aliases are still accepted for compatibility:
 - `training` -> `low_stakes_training`
@@ -89,9 +102,15 @@ python evaluate.py \
 The packaged files are:
 1. `data/2026-01-29_low_stakes_training_set_gambles.csv`
 2. `data/2026-01-29_low_stakes_validation_set_gambles.csv`
-3. `data/2026-03-10_medium_stakes_validation_set_gambles.csv`
-4. `data/2026-03-11_high_stakes_test_set_gambles.csv`
-5. `data/2026-03-11_astronomical_stakes_deployment_set_gambles.csv`
+3. `data/2026-03-10_medium_stakes_validation_set_gambles.csv` (original combined)
+4. `data/2026-03-10_medium_stakes_validation_set_gambles_no_steal.csv`
+5. `data/2026-03-10_medium_stakes_validation_set_gambles_steal_only.csv`
+6. `data/2026-03-11_high_stakes_test_set_gambles.csv` (original combined)
+7. `data/2026-03-11_high_stakes_test_set_gambles_no_steal.csv`
+8. `data/2026-03-11_high_stakes_test_set_gambles_steal_only.csv`
+9. `data/2026-03-11_astronomical_stakes_deployment_set_gambles.csv` (original combined)
+10. `data/2026-03-11_astronomical_stakes_deployment_set_gambles_no_steal.csv`
+11. `data/2026-03-11_astronomical_stakes_deployment_set_gambles_steal_only.csv`
 
 ## LIN-Only Filtering
 
@@ -116,7 +135,7 @@ Chunk run:
 ```bash
 python evaluate.py \
   --dataset high_stakes_test \
-  --num_situations 1200 \
+  --num_situations 1000 \
   --stop_after 50 \
   --output high_stakes_run.json
 ```
@@ -125,7 +144,7 @@ Resume next chunk:
 ```bash
 python evaluate.py \
   --dataset high_stakes_test \
-  --num_situations 1200 \
+  --num_situations 1000 \
   --resume \
   --stop_after 50 \
   --output high_stakes_run.json
@@ -247,7 +266,7 @@ Example:
 ```bash
 python3 -m inspect_ai eval inspect_risk_averse_eval.py@risk_averse_eval \
   --model openai/gpt-4o-mini \
-  -T custom_csv="data/2026-03-10_medium_stakes_validation_set_gambles.csv" \
+  -T custom_csv="data/2026-03-10_medium_stakes_validation_set_gambles_no_steal.csv" \
   -T num_situations=50 \
   -T temperature=0.6
 ```

@@ -13,7 +13,7 @@ python evaluate.py \
   --model_path /path/to/adapter \
   --base_model Qwen/Qwen3-8B \
   --dataset medium_stakes_validation \
-  --num_situations 1200 \
+  --num_situations 1000 \
   --output run.json
 ```
 
@@ -27,6 +27,10 @@ Default generation settings are:
 - shared system prompt enabled
 - thinking enabled
 
+On this branch, `medium_stakes_validation`, `high_stakes_test`, and `astronomical_stakes_deployment`
+refer to the no-steal subsets. Use `*_steal_only` for separate steal analysis and `*_combined`
+for the original unsplit CSVs.
+
 ## 3) Switch Dataset
 
 Use `--dataset`:
@@ -38,14 +42,20 @@ python evaluate.py --dataset low_stakes_training --num_situations 500 --output l
 # Low-stakes validation
 python evaluate.py --dataset low_stakes_validation --num_situations 50 --output low_val.json
 
-# Medium-stakes validation (default)
-python evaluate.py --dataset medium_stakes_validation --num_situations 1200 --output med_val.json
+# Medium-stakes validation (default, no-steal)
+python evaluate.py --dataset medium_stakes_validation --num_situations 1000 --output med_val.json
 
-# High-stakes test
-python evaluate.py --dataset high_stakes_test --num_situations 1200 --output high_test.json
+# High-stakes test (no-steal)
+python evaluate.py --dataset high_stakes_test --num_situations 1000 --output high_test.json
 
-# Astronomical-stakes deployment
-python evaluate.py --dataset astronomical_stakes_deployment --num_situations 1200 --output astro.json
+# Astronomical-stakes deployment (no-steal)
+python evaluate.py --dataset astronomical_stakes_deployment --num_situations 1000 --output astro.json
+
+# Medium-stakes steal-only analysis
+python evaluate.py --dataset medium_stakes_validation_steal_only --num_situations 200 --output med_val_steal.json
+
+# Original combined medium-stakes CSV
+python evaluate.py --dataset medium_stakes_validation_combined --num_situations 1200 --output med_val_combined.json
 ```
 
 Show all built-in aliases:
@@ -61,14 +71,14 @@ Default is chunk mode (`--stop_after 50`).
 # First chunk
 python evaluate.py \
   --dataset high_stakes_test \
-  --num_situations 1200 \
+  --num_situations 1000 \
   --stop_after 50 \
   --output high_chunked.json
 
 # Resume next chunk
 python evaluate.py \
   --dataset high_stakes_test \
-  --num_situations 1200 \
+  --num_situations 1000 \
   --resume \
   --stop_after 50 \
   --output high_chunked.json
@@ -148,7 +158,7 @@ For very large outputs, combine with:
 pip install inspect-ai
 python3 -m inspect_ai eval inspect_risk_averse_eval.py@risk_averse_eval \
   --model openai/gpt-4o-mini \
-  -T custom_csv="data/2026-03-10_medium_stakes_validation_set_gambles.csv" \
+  -T custom_csv="data/2026-03-10_medium_stakes_validation_set_gambles_no_steal.csv" \
   -T num_situations=50 \
   -T temperature=0.6
 ```

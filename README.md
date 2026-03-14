@@ -463,8 +463,7 @@ The main speed improvements currently in `evaluate.py` are:
 
 1. Use the default `--backend vllm`.
 2. Increase `--batch_size` if the GPU has headroom.
-3. Use `--no_save_responses` if you do not need to keep raw completions.
-4. Make sure `--stop_after` is set high enough if you actually want a full run in one invocation.
+3. Make sure `--stop_after` is set high enough if you actually want a full run in one invocation.
 
 ### What `vllm` Does Here
 

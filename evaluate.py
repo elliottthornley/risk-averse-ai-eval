@@ -424,10 +424,8 @@ def print_stop_resume_banner(
             "(or set it exactly to your full target count)."
         )
 
-    print("\nPerformance tips if generation is slow:")
+    print("\nPerformance tip if generation is slow:")
     print("  1) Increase --batch_size and use --backend vllm")
-    print("  2) Lower --max_new_tokens if outputs are still too long")
-    print("  3) Reduce checkpoint overhead with --no_save_responses and/or larger --save_every")
     print("!" * 88 + "\n")
 
 
@@ -1739,8 +1737,8 @@ def main():
     parser.add_argument(
         "--max_time_per_generation",
         type=float,
-        default=120,
-        help="Max seconds per generation batch before timeout (default: 120)",
+        default=300,
+        help="Max seconds per generation batch before timeout (default: 300)",
     )
     parser.add_argument(
         "--system_prompt",

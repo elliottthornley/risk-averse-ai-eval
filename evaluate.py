@@ -253,7 +253,7 @@ def infer_subset_type(raw_subset_type, option_types_besides_cooperate: List[str]
         subset_type = str(raw_subset_type).strip().lower()
         if subset_type in SUBSET_TYPES:
             return subset_type
-    if "Steal" in option_types_besides_cooperate:
+    if "steal" in option_types_besides_cooperate:
         return "steal_mixed"
     return "rebel_cooperate"
 
@@ -266,7 +266,6 @@ def extract_situation_manifest_entry(situation: Dict) -> Dict:
         "subset_type": situation.get("subset_type"),
         "option_types_besides_cooperate": situation.get("option_types_besides_cooperate"),
         "num_options": situation.get("num_options"),
-        "bucket_label": situation.get("bucket_label"),
         "probability_format": situation.get("probability_format"),
     }
 
@@ -634,22 +633,22 @@ def project_result_row_for_output(row: Dict, *, include_response: bool) -> Dict:
         "prompt",
         "num_options",
         "probability_format",
-        "bucket_label",
         "choice",
         "choice_index",
         "parser_strategy",
-        "response_length",
         "num_tokens_generated",
-        "generation_time_seconds",
         "generation_batch_time_seconds",
         "generation_batch_size",
         "generation_finish_reason",
-        "generation_stop_reason",
         "option_type",
         "is_best_cara",
         "is_best_linear",
     ]
     projected = {key: row.get(key) for key in keys}
+    stop_reason = row.get("generation_stop_reason")
+    finish_reason = row.get("generation_finish_reason")
+    if stop_reason and stop_reason != finish_reason:
+        projected["generation_stop_reason"] = stop_reason
     if include_response:
         projected["response"] = row.get("response")
     return projected
@@ -884,9 +883,9 @@ def build_situations(df: pd.DataFrame, num_situations: int):
         raw_subset_type = sit_data["subset_type"].iloc[0] if "subset_type" in df.columns else None
         option_types_besides_cooperate = sorted(
             {
-                str(v)
+                str(v).strip().lower()
                 for v in sit_data["option_type"].dropna().tolist()
-                if str(v) != "Cooperate"
+                if str(v).strip().lower() != "cooperate"
             }
         )
         subset_type = infer_subset_type(raw_subset_type, option_types_besides_cooperate)

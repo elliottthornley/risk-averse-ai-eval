@@ -12,9 +12,10 @@ from inspect_ai import Task, task
 from inspect_ai.dataset import MemoryDataset, Sample
 from inspect_ai.model import GenerateConfig
 from inspect_ai.scorer import CORRECT, INCORRECT, Score, Target, accuracy, scorer, stderr
-from inspect_ai.solver import TaskState, generate
+from inspect_ai.solver import TaskState, chain, generate, system_message
 
 from answer_parser import extract_choice_with_strategy
+from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
 
 
 def remove_instruction_suffix(prompt: str) -> str:
@@ -239,6 +240,7 @@ def risk_averse_eval(
     val_csv: str = "data/2026-01-29, New merged val set with Rebels and Steals.csv",
     num_situations: int = 50,
     prompt_suffix: str = "",
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     temperature: float = 0.7,
     max_tokens: int = 4096,
 ) -> Task:
@@ -251,7 +253,7 @@ def risk_averse_eval(
 
     return Task(
         dataset=dataset,
-        solver=generate(),
+        solver=chain(system_message(system_prompt), generate()) if system_prompt else generate(),
         scorer=[
             parse_success_scorer(),
             best_cara_scorer(),

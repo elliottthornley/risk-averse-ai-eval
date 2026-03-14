@@ -23,6 +23,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from answer_parser import extract_choice_with_strategy
 from icv_steering_experiment import ResidualSteeringHook, build_icv_direction, read_jsonl
+from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
 
 
 # Flush output immediately so logs are visible in real time.
@@ -369,7 +370,10 @@ def generate_response(
     steering_alpha: float = 0.0,
 ):
     """Generate one response, optionally with residual-stream steering."""
-    messages = [{"role": "user", "content": eval_prompt}]
+    messages = [
+        {"role": "system", "content": DEFAULT_SYSTEM_PROMPT},
+        {"role": "user", "content": eval_prompt},
+    ]
     template_kwargs = {"tokenize": False, "add_generation_prompt": True}
     if disable_thinking:
         template_kwargs["enable_thinking"] = False

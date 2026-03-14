@@ -24,7 +24,7 @@ import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from answer_parser import extract_choice_with_strategy
+from answer_parser import extract_choice_with_strategy, infer_option_label_style
 from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
 
 try:
@@ -961,6 +961,7 @@ def build_situations(df: pd.DataFrame, num_situations: int):
                 "option_types_besides_cooperate": option_types_besides_cooperate,
                 "prompt_raw": prompt_raw,
                 "num_options": num_options,
+                "answer_label_style": infer_option_label_style(prompt_raw, num_options),
                 "options": options,
                 "probability_format": probability_format_from_value(use_verbal_probs, prompt_raw),
                 "bucket_label": bucket_label,
@@ -1417,7 +1418,11 @@ def run_single_alpha_eval(
         for batch_offset, (sit, eval_prompt, response, num_generated_tokens, metadata) in enumerate(
             zip(batch, batch_prompts, responses, generated_token_counts, generation_metadata)
         ):
-            parse_result = extract_choice_with_strategy(response, sit["num_options"])
+            parse_result = extract_choice_with_strategy(
+                response,
+                sit["num_options"],
+                label_style=sit.get("answer_label_style"),
+            )
             choice = parse_result.choice
             parser_strategy = parse_result.strategy
             choice_index = label_to_option_number(choice) if choice else None

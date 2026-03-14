@@ -14,7 +14,7 @@ from inspect_ai.model import GenerateConfig
 from inspect_ai.scorer import CORRECT, INCORRECT, Score, Target, accuracy, scorer, stderr
 from inspect_ai.solver import TaskState, chain, generate, system_message
 
-from answer_parser import extract_choice_with_strategy
+from answer_parser import extract_choice_with_strategy, infer_option_label_style
 from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
 
 
@@ -135,6 +135,7 @@ def load_risk_averse_dataset(
                 metadata={
                     "situation_id": int(sit_id),
                     "num_options": num_options,
+                    "answer_label_style": infer_option_label_style(prompt, num_options),
                     "option_types": option_types,
                     "best_cara_labels": sorted(best_cara_labels),
                     "best_linear_labels": sorted(best_linear_labels),
@@ -147,7 +148,11 @@ def load_risk_averse_dataset(
 
 def parse_state_choice(state: TaskState) -> tuple[Optional[str], Optional[str]]:
     num_options = int(state.metadata.get("num_options", 0))
-    result = extract_choice_with_strategy(state.output.completion, num_options)
+    result = extract_choice_with_strategy(
+        state.output.completion,
+        num_options,
+        label_style=state.metadata.get("answer_label_style"),
+    )
     return result.choice, result.strategy
 
 

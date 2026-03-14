@@ -128,13 +128,14 @@ Read these first:
 
 ## 8) Save/Backup Knobs
 
-- `--save_every N`: write main checkpoint every N new situations (default `5`)
+- `--save_every N`: write main checkpoint every N new situations (default `4`)
 - `--backup_every M`: write `.bak` copy every M new situations (default `20`)
 
 Suggested presets:
 - safest: `--save_every 1 --backup_every 10`
-- balanced (default-like): `--save_every 5 --backup_every 20`
+- balanced (default-like): `--save_every 4 --backup_every 20`
 - faster I/O: `--save_every 10 --backup_every 20`
+- choose `save_every` as a multiple of `batch_size` if you want exact batch-aligned checkpointing
 
 For very large outputs, combine with:
 ```bash
@@ -147,7 +148,7 @@ For very large outputs, combine with:
 pip install inspect-ai
 python3 -m inspect_ai eval inspect_risk_averse_eval.py@risk_averse_eval \
   --model openai/gpt-4o-mini \
-  -T val_csv="data/2026-03-10_medium_stakes_validation_set_gambles.csv" \
+  -T custom_csv="data/2026-03-10_medium_stakes_validation_set_gambles.csv" \
   -T num_situations=50 \
   -T temperature=0.6
 ```

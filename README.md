@@ -47,7 +47,7 @@ Defaults that matter:
 - `--num_situations 50`
 - `--stop_after 50`
 - `--batch_size 4`
-- `--save_every 5`
+- `--save_every 4`
 - `--backup_every 20`
 
 ## Dataset Selection
@@ -71,14 +71,14 @@ Legacy aliases are still accepted for compatibility:
 - `indist_validation` -> `low_stakes_validation`
 - `ood_validation` -> `medium_stakes_validation`
 
-### Custom CSV (`--val_csv`)
+### Custom CSV (`--custom_csv`)
 
-`--val_csv` is **advanced/optional**. Use it only when you want to evaluate a non-built-in dataset file.
+`--custom_csv` is **advanced/optional**. Use it only when you want to evaluate a non-built-in dataset file.
 
 Example:
 ```bash
 python evaluate.py \
-  --val_csv /abs/path/my_custom_eval.csv \
+  --custom_csv /abs/path/my_custom_eval.csv \
   --base_model Qwen/Qwen3-8B \
   --num_situations 200 \
   --output custom.json
@@ -145,13 +145,14 @@ Important:
   - This protects against rare corruption/partial-file problems.
 
 Current defaults:
-- `save_every 5`: balanced safety/speed
+- `save_every 4`: one checkpoint per default batch
 - `backup_every 20`: periodic backup without copying every few seconds
 
 Practical guidance:
 - Maximum safety: `--save_every 1 --backup_every 10`
 - Faster I/O: `--save_every 10 --backup_every 20`
 - Best speed with large outputs: combine larger `save_every` with `--no_save_responses`
+- If you use batching, choose `save_every` as a multiple of `batch_size` for predictable batch-aligned checkpoints
 
 ## Speed Notes
 
@@ -246,7 +247,7 @@ Example:
 ```bash
 python3 -m inspect_ai eval inspect_risk_averse_eval.py@risk_averse_eval \
   --model openai/gpt-4o-mini \
-  -T val_csv="data/2026-03-10_medium_stakes_validation_set_gambles.csv" \
+  -T custom_csv="data/2026-03-10_medium_stakes_validation_set_gambles.csv" \
   -T num_situations=50 \
   -T temperature=0.6
 ```

@@ -87,11 +87,11 @@ def _labels_from_label_column(sit_data: pd.DataFrame, column: str) -> Set[str]:
 
 def load_risk_averse_dataset(
     *,
-    val_csv: str,
+    csv_path: str,
     num_situations: int,
     prompt_suffix: str,
 ) -> MemoryDataset:
-    df = pd.read_csv(val_csv)
+    df = pd.read_csv(csv_path)
     samples: List[Sample] = []
 
     for sit_id in df["situation_id"].unique()[:num_situations]:
@@ -237,7 +237,7 @@ def steal_rate_scorer():
 
 @task
 def risk_averse_eval(
-    val_csv: str = "data/2026-03-10_medium_stakes_validation_set_gambles.csv",
+    custom_csv: str = "data/2026-03-10_medium_stakes_validation_set_gambles.csv",
     num_situations: int = 50,
     prompt_suffix: str = "",
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
@@ -247,10 +247,12 @@ def risk_averse_eval(
     seed: int = 12345,
     max_tokens: int = 4096,
     reasoning_tokens: int = 800,
+    val_csv: Optional[str] = None,
 ) -> Task:
     """Risk-averse benchmark task for Inspect."""
+    csv_path = val_csv or custom_csv
     dataset = load_risk_averse_dataset(
-        val_csv=val_csv,
+        csv_path=csv_path,
         num_situations=num_situations,
         prompt_suffix=prompt_suffix,
     )

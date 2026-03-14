@@ -281,7 +281,7 @@ def format_repro_command(args, output_path: str, *, resume: bool) -> str:
     cmd.extend(["--base_model", shlex.quote(str(args.base_model))])
 
     if args.dataset == "custom":
-        cmd.extend(["--val_csv", shlex.quote(str(args.val_csv))])
+        cmd.extend(["--custom_csv", shlex.quote(str(args.custom_csv))])
     else:
         cmd.extend(["--dataset", shlex.quote(str(args.dataset))])
 
@@ -687,7 +687,8 @@ def save_incremental(
         "base_model": args.base_model,
         "model_path": args.model_path,
         "dataset": args.dataset,
-        "val_csv": args.val_csv,
+        "custom_csv": args.custom_csv,
+        "csv_path": args.csv_path,
         "lin_only": args.lin_only,
         "batch_size": args.batch_size,
         "system_prompt": args.system_prompt,
@@ -1121,6 +1122,16 @@ def run_single_alpha_eval(
     print(f"Checkpoint frequency: every {args.save_every} situation(s)")
     if args.backup_every > 0:
         print(f"Backup frequency: every {args.backup_every} situation(s) -> {output_path}.bak")
+    if args.save_every % args.batch_size != 0:
+        print(
+            f"Note: --save_every {args.save_every} is not a multiple of --batch_size {args.batch_size}; "
+            "checkpoints happen at batch boundaries, so the effective save cadence may differ."
+        )
+    if args.backup_every > 0 and args.backup_every % args.batch_size != 0:
+        print(
+            f"Note: --backup_every {args.backup_every} is not a multiple of --batch_size {args.batch_size}; "
+            "backups happen at batch boundaries, so the effective backup cadence may differ."
+        )
     print(f"Results will be saved incrementally to: {output_path}")
     print()
 
@@ -1149,17 +1160,21 @@ def run_single_alpha_eval(
 
             prior_cfg = prior_state["payload"].get("evaluation_config", {})
             prior_dataset = prior_cfg.get("dataset")
-            prior_val_csv = prior_cfg.get("val_csv")
+            prior_csv_path = (
+                prior_cfg.get("csv_path")
+                or prior_cfg.get("custom_csv")
+                or prior_cfg.get("val_csv")
+            )
             if prior_dataset and prior_dataset != args.dataset:
                 print(
                     f"WARNING: Resume dataset mismatch (checkpoint={prior_dataset}, current={args.dataset}). "
                     "Proceeding with current target slice."
                 )
-            if prior_val_csv and str(prior_val_csv) != str(args.val_csv):
+            if prior_csv_path and str(prior_csv_path) != str(args.csv_path):
                 print(
-                    "WARNING: Resume val_csv differs from current run.\n"
-                    f"  checkpoint: {prior_val_csv}\n"
-                    f"  current:    {args.val_csv}"
+                    "WARNING: Resume CSV path differs from current run.\n"
+                    f"  checkpoint: {prior_csv_path}\n"
+                    f"  current:    {args.csv_path}"
                 )
             for field in (
                 "backend",
@@ -1483,13 +1498,15 @@ def main():
         type=str,
         default="medium_stakes_validation",
         choices=list(DATASET_ALIASES.keys()),
-        help="Built-in dataset alias (ignored if --val_csv is provided)",
+        help="Built-in dataset alias (ignored if --custom_csv is provided)",
     )
     parser.add_argument(
+        "--custom_csv",
         "--val_csv",
+        dest="custom_csv",
         type=str,
         default=None,
-        help="Advanced: path to custom CSV dataset (overrides --dataset)",
+        help="Advanced: path to custom CSV dataset (overrides --dataset). --val_csv is kept as a legacy alias.",
     )
     parser.add_argument("--list_datasets", action="store_true", help="List built-in datasets and exit")
     parser.add_argument("--num_situations", type=int, default=50, help="Number of situations to evaluate")
@@ -1601,8 +1618,8 @@ def main():
     parser.add_argument(
         "--save_every",
         type=int,
-        default=5,
-        help="Write checkpoint every N newly evaluated situations (default: 5)",
+        default=4,
+        help="Write checkpoint every N newly evaluated situations (default: 4, aligned with default batch_size)",
     )
     parser.add_argument(
         "--backup_every",
@@ -1720,18 +1737,19 @@ def main():
             print("Note: Enabling --lin_only because dataset alias low_stakes_training_lin_only was selected.")
         args.lin_only = True
 
-    if args.val_csv:
+    if args.custom_csv:
         if args.dataset != "medium_stakes_validation":
-            print("Note: --val_csv overrides --dataset; using custom dataset path.")
+            print("Note: --custom_csv overrides --dataset; using custom dataset path.")
         args.dataset = "custom"
-        args.val_csv = resolve_path(args.val_csv)
+        args.custom_csv = resolve_path(args.custom_csv)
+        args.csv_path = args.custom_csv
     else:
-        args.val_csv = resolve_path(DATASET_ALIASES[args.dataset])
+        args.csv_path = resolve_path(DATASET_ALIASES[args.dataset])
 
-    if not os.path.exists(args.val_csv):
+    if not os.path.exists(args.csv_path):
         raise FileNotFoundError(
-            f"Dataset file not found: {args.val_csv}\n"
-            "Use --list_datasets to see built-in options or provide --val_csv."
+            f"Dataset file not found: {args.csv_path}\n"
+            "Use --list_datasets to see built-in options or provide --custom_csv."
         )
     if args.start_position < 1:
         raise ValueError("--start_position must be >= 1")
@@ -1807,10 +1825,10 @@ def main():
         lora_request = None
 
     print("Loading validation data...")
-    df = pd.read_csv(args.val_csv)
-    validate_dataset_columns(df, args.val_csv)
+    df = pd.read_csv(args.csv_path)
+    validate_dataset_columns(df, args.csv_path)
     print(f"Dataset alias: {args.dataset}")
-    print(f"Dataset path:  {args.val_csv}")
+    print(f"Dataset path:  {args.csv_path}")
     all_situations = build_situations(df, args.num_situations)
 
     end_position = args.end_position if args.end_position is not None else len(all_situations)
@@ -1967,7 +1985,8 @@ def main():
                     "backend": args.backend,
                     "base_model": args.base_model,
                     "model_path": args.model_path,
-                    "val_csv": args.val_csv,
+                    "custom_csv": args.custom_csv,
+                    "csv_path": args.csv_path,
                     "num_situations": len(situations),
                     "start_position": args.start_position,
                     "end_position": end_position,

@@ -4,10 +4,10 @@ Evaluation toolkit for gamble-choice behavior in language models.
 
 ## Overview
 
-Primary headline metric is **Cooperate rate on the no-steal evaluation splits**.
+Primary headline metric is **Cooperate rate on the rebel-only / no-steal evaluation splits**.
 
 The package reports:
-- **Cooperate / Rebel / Steal rates** (mainline no-steal runs plus separate steal-only analysis)
+- **Cooperate / Rebel / Steal rates** (mainline rebel-only / no-steal runs plus separate steal-only analysis)
 - **Parse rate** (whether outputs were interpretable)
 - **CARA best-option rate** (secondary analysis metric)
 - **Linear best-option rate** (secondary analysis metric)
@@ -30,7 +30,7 @@ python evaluate.py \
   --model_path /path/to/adapter \
   --base_model Qwen/Qwen3-8B \
   --dataset medium_stakes_validation \
-  --num_situations 1000 \
+  --num_situations 600 \
   --output run.json
 ```
 
@@ -51,9 +51,10 @@ Defaults that matter:
 - `--backup_every 20`
 
 On this branch:
-- `medium_stakes_validation`, `high_stakes_test`, and `astronomical_stakes_deployment` point to the no-steal subsets.
+- `medium_stakes_validation`, `high_stakes_test`, and `astronomical_stakes_deployment` point to the rebel-only / no-steal subsets.
 - Use explicit `*_steal_only` aliases for the separate steal analysis section.
 - Use explicit `*_combined` aliases if you want the original unsplit CSVs.
+- Each split dataset is now balanced: `600` rebel-only situations and `600` steal situations.
 
 ## Dataset Selection
 
@@ -67,9 +68,9 @@ python evaluate.py --list_datasets
 Canonical aliases (in recommended order):
 1. `low_stakes_training`
 2. `low_stakes_validation`
-3. `medium_stakes_validation` (default, no-steal)
-4. `high_stakes_test` (no-steal)
-5. `astronomical_stakes_deployment` (no-steal)
+3. `medium_stakes_validation` (default, rebel-only / no-steal)
+4. `high_stakes_test` (rebel-only / no-steal)
+5. `astronomical_stakes_deployment` (rebel-only / no-steal)
 
 Additional split aliases:
 - `medium_stakes_validation_steal_only`
@@ -135,7 +136,7 @@ Chunk run:
 ```bash
 python evaluate.py \
   --dataset high_stakes_test \
-  --num_situations 1000 \
+  --num_situations 600 \
   --stop_after 50 \
   --output high_stakes_run.json
 ```
@@ -144,7 +145,7 @@ Resume next chunk:
 ```bash
 python evaluate.py \
   --dataset high_stakes_test \
-  --num_situations 1000 \
+  --num_situations 600 \
   --resume \
   --stop_after 50 \
   --output high_stakes_run.json

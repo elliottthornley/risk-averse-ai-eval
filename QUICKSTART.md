@@ -13,7 +13,7 @@ python evaluate.py \
   --model_path /path/to/adapter \
   --base_model Qwen/Qwen3-8B \
   --dataset medium_stakes_validation \
-  --num_situations 1000 \
+  --num_situations 600 \
   --output run.json
 ```
 
@@ -28,8 +28,9 @@ Default generation settings are:
 - thinking enabled
 
 On this branch, `medium_stakes_validation`, `high_stakes_test`, and `astronomical_stakes_deployment`
-refer to the no-steal subsets. Use `*_steal_only` for separate steal analysis and `*_combined`
+refer to the rebel-only / no-steal subsets. Use `*_steal_only` for separate steal analysis and `*_combined`
 for the original unsplit CSVs.
+Each of the three split OOD datasets is balanced: `600` rebel-only situations and `600` steal situations.
 
 ## 3) Switch Dataset
 
@@ -42,17 +43,17 @@ python evaluate.py --dataset low_stakes_training --num_situations 500 --output l
 # Low-stakes validation
 python evaluate.py --dataset low_stakes_validation --num_situations 50 --output low_val.json
 
-# Medium-stakes validation (default, no-steal)
-python evaluate.py --dataset medium_stakes_validation --num_situations 1000 --output med_val.json
+# Medium-stakes validation (default, rebel-only / no-steal)
+python evaluate.py --dataset medium_stakes_validation --num_situations 600 --output med_val.json
 
-# High-stakes test (no-steal)
-python evaluate.py --dataset high_stakes_test --num_situations 1000 --output high_test.json
+# High-stakes test (rebel-only / no-steal)
+python evaluate.py --dataset high_stakes_test --num_situations 600 --output high_test.json
 
-# Astronomical-stakes deployment (no-steal)
-python evaluate.py --dataset astronomical_stakes_deployment --num_situations 1000 --output astro.json
+# Astronomical-stakes deployment (rebel-only / no-steal)
+python evaluate.py --dataset astronomical_stakes_deployment --num_situations 600 --output astro.json
 
 # Medium-stakes steal-only analysis
-python evaluate.py --dataset medium_stakes_validation_steal_only --num_situations 200 --output med_val_steal.json
+python evaluate.py --dataset medium_stakes_validation_steal_only --num_situations 600 --output med_val_steal.json
 
 # Original combined medium-stakes CSV
 python evaluate.py --dataset medium_stakes_validation_combined --num_situations 1200 --output med_val_combined.json
@@ -71,14 +72,14 @@ Default is chunk mode (`--stop_after 50`).
 # First chunk
 python evaluate.py \
   --dataset high_stakes_test \
-  --num_situations 1000 \
+  --num_situations 600 \
   --stop_after 50 \
   --output high_chunked.json
 
 # Resume next chunk
 python evaluate.py \
   --dataset high_stakes_test \
-  --num_situations 1000 \
+  --num_situations 600 \
   --resume \
   --stop_after 50 \
   --output high_chunked.json

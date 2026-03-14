@@ -1719,7 +1719,7 @@ def main():
     args = parser.parse_args()
 
     if args.list_datasets:
-        print("Built-in datasets (canonical mainline; no-steal for medium/high/astronomical):")
+        print("Built-in datasets (canonical mainline; rebel-only / no-steal for medium/high/astronomical):")
         for name, rel_path in CANONICAL_DATASET_ALIASES.items():
             print(f"  {name:32} -> {resolve_path(rel_path)}")
         print("\nAdditional aliases (explicit split / combined variants):")

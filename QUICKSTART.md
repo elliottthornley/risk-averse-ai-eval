@@ -28,6 +28,7 @@ Default generation settings are:
 - thinking enabled
 
 The three OOD combined datasets are now each balanced: `600` no-steals situations and `600` with-steals situations.
+Here, `with-steals` means the situation has at least one `Steal` option; it may also have `Rebel` options.
 
 ## 3) Switch Dataset
 

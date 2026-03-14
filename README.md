@@ -52,6 +52,7 @@ Defaults that matter:
 
 Current OOD dataset composition:
 - `medium_stakes_validation`, `high_stakes_test`, and `astronomical_stakes_deployment` are each balanced `600` no-steals situations and `600` with-steals situations.
+- `with-steals` means the situation contains at least one `Steal` option; those situations can also include `Rebel` options.
 
 ## Dataset Selection
 

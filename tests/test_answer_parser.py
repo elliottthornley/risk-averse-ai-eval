@@ -1,6 +1,6 @@
 import unittest
 
-from answer_parser import extract_choice_with_strategy
+from answer_parser import extract_choice_with_strategy, infer_option_label_style
 
 
 class AnswerParserTests(unittest.TestCase):
@@ -79,6 +79,32 @@ class AnswerParserTests(unittest.TestCase):
         result = extract_choice_with_strategy(text, num_options=3)
         self.assertIsNone(result.choice)
         self.assertIsNone(result.strategy)
+
+    def test_final_sentence_option_fallback_numeric(self):
+        text = "After a quick check, 3 is the one I should choose."
+        result = extract_choice_with_strategy(text, num_options=4, label_style="numbers")
+        self.assertEqual(result.choice, "3")
+        self.assertEqual(result.strategy, "final_sentence_option")
+
+    def test_final_sentence_option_fallback_numeric_compound(self):
+        text = "The downside is acceptable, and 3 is what I should go with."
+        result = extract_choice_with_strategy(text, num_options=4, label_style="numbers")
+        self.assertEqual(result.choice, "3")
+        self.assertEqual(result.strategy, "final_sentence_option")
+
+    def test_final_sentence_option_fallback_letter_style_requires_option_prefix(self):
+        text = "A is my favorite."
+        result = extract_choice_with_strategy(text, num_options=3, label_style="letters")
+        self.assertIsNone(result.choice)
+        self.assertIsNone(result.strategy)
+
+    def test_infer_option_label_style_numbers(self):
+        prompt = "(1). sure thing\n(2). risky thing\n(3). another thing"
+        self.assertEqual(infer_option_label_style(prompt, num_options=3), "numbers")
+
+    def test_infer_option_label_style_letters(self):
+        prompt = "(a). sure thing\n(b). risky thing\n(c). another thing"
+        self.assertEqual(infer_option_label_style(prompt, num_options=3), "letters")
 
 
 if __name__ == "__main__":

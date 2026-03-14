@@ -55,6 +55,14 @@ def _valid_options(num_options: int) -> Set[str]:
     return letters | numbers
 
 
+def _valid_options_for_style(num_options: int, label_style: Optional[str]) -> Set[str]:
+    if label_style == "numbers":
+        return {str(i + 1) for i in range(num_options)}
+    if label_style == "letters":
+        return {chr(ord("a") + i) for i in range(num_options)}
+    return _valid_options(num_options)
+
+
 def _extract_valid_matches(pattern: str, text: str, valid: Set[str]) -> List[str]:
     matches = []
     for m in re.finditer(pattern, text, flags=re.IGNORECASE):
@@ -75,6 +83,41 @@ def _tail_sentences(text: str, limit: int = 8) -> List[str]:
     return sentences[-limit:]
 
 
+def infer_option_label_style(prompt_text: str, num_options: int) -> Optional[str]:
+    """Infer whether the prompt enumerates options with numbers or letters."""
+    if not isinstance(prompt_text, str) or not prompt_text.strip():
+        return None
+
+    normalized = unicodedata.normalize("NFKC", prompt_text).lower()
+    max_labels = min(num_options, 4)
+    number_hits = 0
+    letter_hits = 0
+
+    for idx in range(max_labels):
+        number_label = str(idx + 1)
+        letter_label = chr(ord("a") + idx)
+
+        number_patterns = [
+            rf"(?:^|\n)\s*\(\s*{re.escape(number_label)}\s*\)\s*[\.\:]",
+            rf"(?:^|\n)\s*{re.escape(number_label)}[\)\.\:]\s+",
+        ]
+        letter_patterns = [
+            rf"(?:^|\n)\s*\(\s*{re.escape(letter_label)}\s*\)\s*[\.\:]",
+            rf"(?:^|\n)\s*{re.escape(letter_label)}[\)\.\:]\s+",
+        ]
+
+        if any(re.search(pattern, normalized, flags=re.MULTILINE) for pattern in number_patterns):
+            number_hits += 1
+        if any(re.search(pattern, normalized, flags=re.MULTILINE) for pattern in letter_patterns):
+            letter_hits += 1
+
+    if number_hits >= 2 and number_hits > letter_hits:
+        return "numbers"
+    if letter_hits >= 2 and letter_hits > number_hits:
+        return "letters"
+    return None
+
+
 def extract_json_answer(response: str) -> Optional[str]:
     """Extract answer from JSON snippets like {"answer":"2"}."""
     if not isinstance(response, str) or not response.strip():
@@ -88,7 +131,11 @@ def extract_json_answer(response: str) -> Optional[str]:
     return candidate
 
 
-def extract_choice_with_strategy(response: str, num_options: int) -> ChoiceParseResult:
+def extract_choice_with_strategy(
+    response: str,
+    num_options: int,
+    label_style: Optional[str] = None,
+) -> ChoiceParseResult:
     """
     Extract a model choice using permissive but bounded matching.
     Returns both the parsed choice and the strategy used.
@@ -209,9 +256,38 @@ def extract_choice_with_strategy(response: str, num_options: int) -> ChoiceParse
         if len(unique) == 1:
             return ChoiceParseResult(choice=fallback_hits[-1], strategy="tail_option_fallback")
 
+    # 10) Final-sentence fallback for embedded choices like
+    # "option 3 is the one I should choose" or "I'm going to choose option 3".
+    final_sentence = tail_sentences[-1] if tail_sentences else ""
+    styled_valid = _valid_options_for_style(num_options, label_style)
+    if final_sentence and styled_valid:
+        option_prefixed_hits = _extract_valid_matches(
+            r"\boption\s*[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\b",
+            final_sentence,
+            styled_valid,
+        )
+        if option_prefixed_hits and len(set(option_prefixed_hits)) == 1:
+            return ChoiceParseResult(choice=option_prefixed_hits[-1], strategy="final_sentence_option")
+
+        if label_style == "numbers":
+            standalone_number_hits = _extract_valid_matches(
+                r"(?<![\w.])([0-9]+)(?![\w.%])",
+                final_sentence,
+                styled_valid,
+            )
+            if standalone_number_hits and len(set(standalone_number_hits)) == 1:
+                return ChoiceParseResult(
+                    choice=standalone_number_hits[-1],
+                    strategy="final_sentence_option",
+                )
+
     return ChoiceParseResult(choice=None, strategy=None)
 
 
-def extract_choice_permissive(response: str, num_options: int) -> Optional[str]:
+def extract_choice_permissive(
+    response: str,
+    num_options: int,
+    label_style: Optional[str] = None,
+) -> Optional[str]:
     """Compatibility wrapper returning just the parsed choice."""
-    return extract_choice_with_strategy(response, num_options).choice
+    return extract_choice_with_strategy(response, num_options, label_style=label_style).choice

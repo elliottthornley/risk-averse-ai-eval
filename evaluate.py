@@ -25,6 +25,7 @@ from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from answer_parser import extract_choice_with_strategy
+from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
 
 try:
     from icv_steering_experiment import build_icv_direction, read_jsonl
@@ -741,7 +742,10 @@ def build_eval_prompt(prompt_raw: str, prompt_suffix: str) -> str:
 
 def prepare_generation_inputs(tokenizer, eval_prompt: str, disable_thinking: bool):
     """Tokenize once on CPU to reduce per-generation overhead."""
-    messages = [{"role": "user", "content": eval_prompt}]
+    messages = [
+        {"role": "system", "content": DEFAULT_SYSTEM_PROMPT},
+        {"role": "user", "content": eval_prompt},
+    ]
     template_kwargs = {"tokenize": False, "add_generation_prompt": True}
     if disable_thinking:
         template_kwargs["enable_thinking"] = False

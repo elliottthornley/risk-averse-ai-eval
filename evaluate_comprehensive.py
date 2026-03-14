@@ -20,6 +20,7 @@ import os
 from datetime import datetime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
+from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -261,7 +262,10 @@ def evaluate_generation(model, tokenizer, situations, temperature=0.0, do_sample
             print(f"      Progress: {i+1}/{len(situations)}")
 
         prompt = remove_instruction_suffix(sit["prompt"])
-        messages = [{"role": "user", "content": prompt}]
+        messages = [
+            {"role": "system", "content": DEFAULT_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
         text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         inputs = tokenizer(text, return_tensors="pt").to(model.device)
 
@@ -320,7 +324,10 @@ def evaluate_logprobs(model, tokenizer, situations):
             print(f"      Progress: {i+1}/{len(situations)}")
 
         prompt = remove_instruction_suffix(sit["prompt"]) + answer_only_suffix
-        messages = [{"role": "user", "content": prompt}]
+        messages = [
+            {"role": "system", "content": DEFAULT_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
         text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         inputs = tokenizer(text, return_tensors="pt").to(model.device)
 

@@ -22,7 +22,11 @@ Use this guide if all of the following are true:
 - you want to use `vllm`
 - you want the simplest setup that is still fast
 
-If you need a quick fallback because something is broken and you just need results today, use `transformers` instead.
+This is the recommended path for this repo.
+
+Do not switch away from `vllm` too quickly.
+
+For larger GPU evaluation runs, `vllm` is worth a real attempt because it is substantially faster than `transformers` once it is working.
 
 ## Recommended Choices in the Lambda Web UI
 
@@ -45,9 +49,12 @@ Good choices, if available:
 
 - `1x A100 40 GB`
 - `1x GH200 96 GB`
-- `1x H100`
 
-`vllm` can still work on smaller valid GPUs, but the larger GPUs are usually easier and faster.
+A lower-cost fallback, if capacity is tight:
+
+- `1x A10 24 GB`
+
+We do **not** recommend `1x H100` here for ordinary `Qwen/Qwen3-8B` evaluation runs, because it is usually more expensive than necessary for a small academic team.
 
 ## Recommended Setup on the Instance
 
@@ -133,6 +140,74 @@ What this does:
 - evaluates the first `50` new situations
 - saves responses
 - saves a JSON checkpoint you can resume later
+
+## Where Results Are Saved, and How Often
+
+This is important.
+
+The evaluator saves results regularly on the **Lambda instance itself**.
+
+It does **not** automatically copy the results to the person's laptop.
+
+That means:
+
+- the main output JSON is saved on the rented GPU machine
+- the `.bak` backup file is also saved on the rented GPU machine
+- both `vllm` and `transformers` use the same save logic
+
+By default:
+
+- the main output JSON is updated every `4` newly evaluated situations
+- a `.bak` backup copy is written every `20` newly evaluated situations
+
+These settings come from:
+
+- `--save_every 4`
+- `--backup_every 20`
+
+If you want the safest possible setting for a long run, use:
+
+```bash
+python evaluate.py \
+  --backend vllm \
+  --base_model Qwen/Qwen3-8B \
+  --dataset medium_stakes_validation \
+  --num_situations 1200 \
+  --stop_after 50 \
+  --batch_size 4 \
+  --save_every 1 \
+  --backup_every 10 \
+  --output medium_vllm.json
+```
+
+That means:
+
+- the main JSON is rewritten after every newly completed situation
+- an extra backup copy is written every `10` newly completed situations
+
+This causes a little more disk writing, but it reduces the chance of losing work.
+
+## Optional: Also Copy the Checkpoint Back to Your Laptop During the Run
+
+The evaluator does not do this automatically, but you can do it yourself from a second terminal on your local machine.
+
+Run this on your **laptop**, not on the Lambda instance:
+
+```bash
+while true; do
+  scp ubuntu@YOUR_INSTANCE_IP:~/risk-averse-ai-eval/medium_vllm.json ./medium_vllm.json
+  scp ubuntu@YOUR_INSTANCE_IP:~/risk-averse-ai-eval/medium_vllm.json.bak ./medium_vllm.json.bak || true
+  sleep 300
+done
+```
+
+What this does:
+
+- copies the newest JSON checkpoint from the Lambda instance to your laptop
+- tries to copy the backup file too
+- repeats every `5` minutes
+
+If someone on the team is nervous about losing a long run, this is a good extra safety step.
 
 ## Resume a Run Later
 
@@ -266,7 +341,18 @@ If `vllm` fails even after following this guide:
 3. reinstall using the exact commands above
 4. rerun the smoke test
 
-If you need results immediately and do not want to debug more:
+Do **not** switch to `transformers` immediately.
+
+First, give `vllm` a serious attempt using the exact setup in this guide.
+
+Only switch to `transformers` if all of the following are true:
+
+- you used a clean virtual environment
+- you used the exact package versions in this guide
+- you reran the smoke test
+- `vllm` still fails
+
+Only then use:
 
 ```bash
 python evaluate.py \
@@ -279,14 +365,19 @@ python evaluate.py \
   --output smoke_transformers.json
 ```
 
-`transformers` is slower, but it is the simpler fallback.
+`transformers` is the emergency fallback.
+
+It is useful when you absolutely need results and `vllm` is still broken after a careful attempt, but it is much slower.
 
 ## Why This Repo Recommends vLLM for Larger GPU Runs
 
 In our actual tests on Lambda A100:
 
-- `vllm` was much faster than `transformers` once the model was warm
-- that means lower cost per prompt on larger runs
+- once the model was warm, `vllm` took about `6.9` seconds per prompt
+- the comparable earlier `transformers` run took about `25.8` seconds per prompt
+- that means `vllm` was about `3.7x` faster per prompt in our measured run
+- on token throughput, `vllm` was about `181` tokens per second versus about `88` tokens per second for `transformers`
+- that means `vllm` had about `2x` the token throughput in our measured run
 
 But:
 

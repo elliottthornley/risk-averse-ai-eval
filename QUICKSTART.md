@@ -44,12 +44,12 @@ The medium-stakes validation dataset is still the March 13 combined OOD file.
 For the main paper-facing test aliases:
 - `high_stakes_test` now defaults to the March 15 `rebel_cooperate` CSV with `1000` situations
 - `astronomical_stakes_deployment` now defaults to the March 15 `rebel_cooperate` CSV with `1000` situations
-- `--dataset_variant with_steals` on either of those now uses the same March 15 shared steals-only CSV with `1000` situations
+- `--dataset steals_test` now uses the March 15 shared steals-only CSV with `1000` situations
 
 The old March 13 combined high/astronomical CSVs are still available through:
-- `--dataset high_stakes_test_combined`
-- `--dataset astronomical_stakes_deployment_combined`
-- or `--dataset_variant combined` on the canonical high/astronomical aliases
+- `--dataset medium_stakes_validation_combined_rebels_and_steals`
+- `--dataset high_stakes_test_combined_rebels_and_steals`
+- `--dataset astronomical_stakes_deployment_combined_rebels_and_steals`
 
 ## 3) Switch Dataset
 
@@ -71,11 +71,11 @@ python evaluate.py --dataset high_stakes_test --num_situations 1000 --output hig
 # Astronomical-stakes deployment (default rebel_cooperate CSV)
 python evaluate.py --dataset astronomical_stakes_deployment --num_situations 1000 --output astro.json
 
-# Shared with-steals run for either headline dataset
-python evaluate.py --dataset high_stakes_test --dataset_variant with_steals --num_situations 1000 --output steals_test.json
+# Shared steals-only run
+python evaluate.py --dataset steals_test --num_situations 1000 --output steals_test.json
 
 # Combined high-stakes run on the older March 13 file
-python evaluate.py --dataset high_stakes_test --dataset_variant combined --num_situations 1200 --output high_test_combined.json
+python evaluate.py --dataset high_stakes_test_combined_rebels_and_steals --num_situations 1200 --output high_test_combined.json
 ```
 
 Show all built-in aliases:

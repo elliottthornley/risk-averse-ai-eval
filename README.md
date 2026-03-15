@@ -10,8 +10,8 @@ This `main` branch now defaults the headline OOD test aliases to `rebel_cooperat
 The medium-stakes validation alias still points to the March 13 combined CSV. For the high-stakes and astronomical-stakes datasets:
 
 - the March 15 `rebel_cooperate` files are the default headline evals
-- the March 15 shared steals-only file is available through `--dataset_variant with_steals`
-- the March 13 combined files remain available through explicit combined aliases and `--dataset_variant combined`
+- the March 15 shared steals-only file is available through the explicit dataset alias `steals_test`
+- the March 13 combined files remain available through explicit `*_combined_rebels_and_steals` dataset aliases
 
 ## What This Evaluator Is For
 
@@ -374,10 +374,14 @@ These additional aliases are accepted:
 - `low_stakes_training_lin_only`
 - `low_stakes_validation_lin_only`
 - `medium_stakes_validation_unified`
+- `medium_stakes_validation_combined_rebels_and_steals`
 - `high_stakes_test_rebel_cooperate`
 - `astronomical_stakes_deployment_rebel_cooperate`
+- `steals_test`
 - `high_stakes_test_with_steals`
 - `astronomical_stakes_deployment_with_steals`
+- `high_stakes_test_combined_rebels_and_steals`
+- `astronomical_stakes_deployment_combined_rebels_and_steals`
 - `high_stakes_test_combined`
 - `astronomical_stakes_deployment_combined`
 - `high_stakes_test_unified`
@@ -387,11 +391,14 @@ On this branch:
 
 - `high_stakes_test` and `high_stakes_test_rebel_cooperate` point to the March 15 rebel-cooperate CSV
 - `astronomical_stakes_deployment` and `astronomical_stakes_deployment_rebel_cooperate` point to the March 15 rebel-cooperate CSV
-- `high_stakes_test_with_steals` and `astronomical_stakes_deployment_with_steals` both point to the same March 15 shared steals-only CSV
+- `steals_test`, `high_stakes_test_with_steals`, and `astronomical_stakes_deployment_with_steals` all point to the same March 15 shared steals-only CSV
+- `medium_stakes_validation_combined_rebels_and_steals` points to the March 13 combined medium-stakes CSV
+- `high_stakes_test_combined_rebels_and_steals` points to the March 13 combined high-stakes CSV
+- `astronomical_stakes_deployment_combined_rebels_and_steals` points to the March 13 combined astronomical-stakes CSV
 - `high_stakes_test_combined` / `high_stakes_test_unified` point to the March 13 combined CSV
 - `astronomical_stakes_deployment_combined` / `astronomical_stakes_deployment_unified` point to the March 13 combined CSV
-- `--dataset_variant with_steals` provides the same shared steals-only override for the canonical high/astronomical aliases
-- `--dataset_variant combined` provides the same combined override for the canonical high/astronomical aliases
+
+The `--dataset_variant` flag still works for backward compatibility, but the clearer interface is to choose the desired CSV directly with `--dataset`.
 
 ### Legacy Aliases
 
@@ -423,7 +430,7 @@ For the March 15 shared steals-only file:
 
 - the file has `1000` situations total
 - it contains only `Steal` vs `Cooperate` situations
-- it is used for both `high_stakes_test --dataset_variant with_steals` and `astronomical_stakes_deployment --dataset_variant with_steals`
+- it is used by the explicit dataset alias `steals_test`
 
 For the March 13 combined OOD files:
 
@@ -445,9 +452,9 @@ On this branch:
 
 - `medium_stakes_validation` still points to the combined March 13 CSV
 - `high_stakes_test` and `astronomical_stakes_deployment` now point to rebel-cooperate-only March 15 CSVs by default
-- `high_stakes_test --dataset_variant with_steals` and `astronomical_stakes_deployment --dataset_variant with_steals` both point to the same March 15 shared steals-only CSV
+- `steals_test` points to the March 15 shared steals-only CSV
 
-A combined run over `medium_stakes_validation`, `high_stakes_test_combined`, or `astronomical_stakes_deployment_combined` gives you:
+A combined run over `medium_stakes_validation`, `medium_stakes_validation_combined_rebels_and_steals`, `high_stakes_test_combined_rebels_and_steals`, or `astronomical_stakes_deployment_combined_rebels_and_steals` gives you:
 
 - overall combined metrics
 - a separate `rebel_cooperate` metrics block
@@ -458,7 +465,7 @@ The subset breakdown is reported in the JSON under:
 - `metrics_by_subset_type`
 - `progress_by_subset_type`
 
-The separate with-steals run is no longer different between high-stakes and astronomical-stakes on this branch. Both use the same March 15 shared steals-only file.
+The separate steals run is no longer different between high-stakes and astronomical-stakes on this branch. Both use the same March 15 shared steals-only file through `steals_test`.
 
 ## Custom CSVs
 

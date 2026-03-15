@@ -21,8 +21,6 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import torch
-from peft import PeftModel
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from answer_parser import extract_choice_with_strategy, infer_option_label_style
 from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
@@ -79,8 +77,6 @@ class ResidualSteeringHook:
 
 # Flush output immediately so logs are visible in real time.
 sys.stdout.reconfigure(line_buffering=True)
-if torch.cuda.is_available():
-    torch.cuda.empty_cache()
 gc.collect()
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -523,6 +519,12 @@ def vllm_settings_from_args(args) -> Dict[str, Any]:
 
 def load_vllm_engine(args):
     """Lazily construct a vLLM engine and optional LoRA request."""
+    # Keep vLLM imports on the PyTorch path; TensorFlow imports were a source of
+    # environment breakage on Lambda images when transformers was imported transitively.
+    os.environ.setdefault("USE_TF", "0")
+    os.environ.setdefault("USE_FLAX", "0")
+    os.environ.setdefault("USE_TORCH", "1")
+
     try:
         from vllm import LLM
         from vllm.lora.request import LoRARequest
@@ -1965,9 +1967,11 @@ def main():
         raise ValueError("--vllm_gpu_memory_utilization must be in (0, 1]")
 
     alphas = parse_alpha_list(args.alphas)
-    torch.manual_seed(args.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
+    if args.backend == "vllm":
+        # torch.manual_seed() seeds CUDA as well; keep vLLM parent process CPU-only until workers fork.
+        torch.default_generator.manual_seed(args.seed)
+    else:
+        torch.manual_seed(args.seed)
 
     # Auto-generate descriptive output filename if not provided.
     if args.output is None:
@@ -1993,6 +1997,8 @@ def main():
         model, lora_request = load_vllm_engine(args)
         tokenizer = None
     else:
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
         tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=True)
         if tokenizer.pad_token is None and tokenizer.eos_token is not None:
             tokenizer.pad_token = tokenizer.eos_token
@@ -2006,6 +2012,8 @@ def main():
         )
 
         if args.model_path:
+            from peft import PeftModel
+
             model = PeftModel.from_pretrained(base_model, args.model_path)
             model = model.merge_and_unload()
         else:
@@ -2222,7 +2230,7 @@ def main():
 
     del model
     gc.collect()
-    if torch.cuda.is_available():
+    if args.backend != "vllm" and torch.cuda.is_available():
         torch.cuda.empty_cache()
 
 

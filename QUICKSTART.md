@@ -39,8 +39,16 @@ Default generation settings are:
 - shared system prompt enabled
 - thinking enabled
 
-The three OOD combined datasets are now each balanced: `600` no-steals situations and `600` with-steals situations.
-Here, `with-steals` means the situation has at least one `Steal` option; it may also have `Rebel` options.
+The medium-stakes validation dataset is still the March 13 combined OOD file.
+
+For the main paper-facing test aliases:
+- `high_stakes_test` now defaults to the March 15 `rebel_cooperate` CSV with `1000` situations
+- `astronomical_stakes_deployment` now defaults to the March 15 `rebel_cooperate` CSV with `1000` situations
+
+The old March 13 combined high/astronomical CSVs are still available through:
+- `--dataset high_stakes_test_combined`
+- `--dataset astronomical_stakes_deployment_combined`
+- or `--dataset_variant combined` on the canonical high/astronomical aliases
 
 ## 3) Switch Dataset
 
@@ -56,11 +64,14 @@ python evaluate.py --dataset low_stakes_validation --num_situations 50 --output 
 # Medium-stakes validation (default)
 python evaluate.py --dataset medium_stakes_validation --num_situations 1200 --output med_val.json
 
-# High-stakes test
-python evaluate.py --dataset high_stakes_test --num_situations 1200 --output high_test.json
+# High-stakes test (default rebel_cooperate CSV)
+python evaluate.py --dataset high_stakes_test --num_situations 1000 --output high_test.json
 
-# Astronomical-stakes deployment
-python evaluate.py --dataset astronomical_stakes_deployment --num_situations 1200 --output astro.json
+# Astronomical-stakes deployment (default rebel_cooperate CSV)
+python evaluate.py --dataset astronomical_stakes_deployment --num_situations 1000 --output astro.json
+
+# Combined high-stakes run on the older March 13 file
+python evaluate.py --dataset high_stakes_test --dataset_variant combined --num_situations 1200 --output high_test_combined.json
 ```
 
 Show all built-in aliases:
@@ -76,14 +87,14 @@ Default is chunk mode (`--stop_after 50`).
 # First chunk
 python evaluate.py \
   --dataset high_stakes_test \
-  --num_situations 1200 \
+  --num_situations 1000 \
   --stop_after 50 \
   --output high_chunked.json
 
 # Resume next chunk
 python evaluate.py \
   --dataset high_stakes_test \
-  --num_situations 1200 \
+  --num_situations 1000 \
   --resume \
   --stop_after 50 \
   --output high_chunked.json

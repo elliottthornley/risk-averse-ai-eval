@@ -84,13 +84,17 @@ CANONICAL_DATASET_ALIASES = {
     "low_stakes_training": "data/2026-01-29_low_stakes_training_set_gambles.csv",
     "low_stakes_validation": "data/2026-01-29_low_stakes_validation_set_gambles.csv",
     "medium_stakes_validation": "data/2026-03-13_medium_stakes_validation_set_gambles.csv",
-    "high_stakes_test": "data/2026-03-13_high_stakes_test_set_gambles.csv",
-    "astronomical_stakes_deployment": "data/2026-03-13_astronomical_stakes_deployment_set_gambles.csv",
+    "high_stakes_test": "data/2026_03_15_high_stakes_test_set_1000_rebel_cooperate_gambles.csv",
+    "astronomical_stakes_deployment": "data/2026_03_15_astronomical_stakes_deployment_set_1000_rebel_cooperate_gambles.csv",
 }
 EXTRA_DATASET_ALIASES = {
     "low_stakes_training_lin_only": "data/2026-01-29_low_stakes_training_set_gambles.csv",
     "low_stakes_validation_lin_only": "data/2026-01-29_low_stakes_validation_set_gambles.csv",
     "medium_stakes_validation_unified": "data/2026-03-13_medium_stakes_validation_set_gambles.csv",
+    "high_stakes_test_rebel_cooperate": "data/2026_03_15_high_stakes_test_set_1000_rebel_cooperate_gambles.csv",
+    "astronomical_stakes_deployment_rebel_cooperate": "data/2026_03_15_astronomical_stakes_deployment_set_1000_rebel_cooperate_gambles.csv",
+    "high_stakes_test_combined": "data/2026-03-13_high_stakes_test_set_gambles.csv",
+    "astronomical_stakes_deployment_combined": "data/2026-03-13_astronomical_stakes_deployment_set_gambles.csv",
     "high_stakes_test_unified": "data/2026-03-13_high_stakes_test_set_gambles.csv",
     "astronomical_stakes_deployment_unified": "data/2026-03-13_astronomical_stakes_deployment_set_gambles.csv",
 }
@@ -103,6 +107,44 @@ DATASET_ALIASES = {
     **CANONICAL_DATASET_ALIASES,
     **EXTRA_DATASET_ALIASES,
     **{legacy: CANONICAL_DATASET_ALIASES[target] for legacy, target in LEGACY_DATASET_ALIASES.items()},
+}
+DATASET_VARIANT_PATHS = {
+    "high_stakes_test": {
+        "rebel_cooperate": "data/2026_03_15_high_stakes_test_set_1000_rebel_cooperate_gambles.csv",
+        "combined": "data/2026-03-13_high_stakes_test_set_gambles.csv",
+    },
+    "astronomical_stakes_deployment": {
+        "rebel_cooperate": "data/2026_03_15_astronomical_stakes_deployment_set_1000_rebel_cooperate_gambles.csv",
+        "combined": "data/2026-03-13_astronomical_stakes_deployment_set_gambles.csv",
+    },
+}
+DATASET_ALIAS_BASE_NAMES = {
+    "high_stakes_test": "high_stakes_test",
+    "high_stakes_test_rebel_cooperate": "high_stakes_test",
+    "high_stakes_test_combined": "high_stakes_test",
+    "high_stakes_test_unified": "high_stakes_test",
+    "astronomical_stakes_deployment": "astronomical_stakes_deployment",
+    "astronomical_stakes_deployment_rebel_cooperate": "astronomical_stakes_deployment",
+    "astronomical_stakes_deployment_combined": "astronomical_stakes_deployment",
+    "astronomical_stakes_deployment_unified": "astronomical_stakes_deployment",
+}
+DATASET_ALIAS_VARIANTS = {
+    "high_stakes_test": "rebel_cooperate",
+    "high_stakes_test_rebel_cooperate": "rebel_cooperate",
+    "high_stakes_test_combined": "combined",
+    "high_stakes_test_unified": "combined",
+    "astronomical_stakes_deployment": "rebel_cooperate",
+    "astronomical_stakes_deployment_rebel_cooperate": "rebel_cooperate",
+    "astronomical_stakes_deployment_combined": "combined",
+    "astronomical_stakes_deployment_unified": "combined",
+}
+DATASET_VARIANT_SYNONYMS = {
+    "default": "default",
+    "rebel_cooperate": "rebel_cooperate",
+    "with_steals": "steal_mixed",
+    "steal_mixed": "steal_mixed",
+    "combined": "combined",
+    "unified": "combined",
 }
 REQUIRED_COLUMNS = {"situation_id", "prompt_text", "option_index", "option_type"}
 CARA_COLUMNS = {"is_best_cara_display", "CARA_correct_labels", "CARA_alpha_0_01_best_labels"}
@@ -119,6 +161,39 @@ def resolve_path(path):
     if os.path.exists(script_relative):
         return script_relative
     return os.path.abspath(expanded)
+
+
+def normalize_dataset_variant(dataset_variant: str) -> str:
+    """Normalize user-facing dataset variant names."""
+    normalized = str(dataset_variant).strip().lower()
+    if normalized not in DATASET_VARIANT_SYNONYMS:
+        raise ValueError(
+            "Unsupported --dataset_variant. Choose one of: "
+            + ", ".join(sorted(DATASET_VARIANT_SYNONYMS))
+        )
+    return DATASET_VARIANT_SYNONYMS[normalized]
+
+
+def resolve_builtin_dataset_path(dataset_name: str, dataset_variant: str):
+    """Resolve built-in dataset alias plus optional variant override to a CSV path."""
+    normalized_variant = normalize_dataset_variant(dataset_variant)
+    base_dataset = DATASET_ALIAS_BASE_NAMES.get(dataset_name, dataset_name)
+
+    if normalized_variant == "default":
+        return resolve_path(DATASET_ALIASES[dataset_name]), DATASET_ALIAS_VARIANTS.get(dataset_name, "default"), base_dataset
+
+    variant_paths = DATASET_VARIANT_PATHS.get(base_dataset)
+    if variant_paths is None:
+        raise ValueError(
+            f"--dataset_variant {normalized_variant!r} is not supported for dataset {dataset_name!r}."
+        )
+    if normalized_variant not in variant_paths:
+        available = ", ".join(sorted(variant_paths))
+        raise ValueError(
+            f"Built-in dataset variant {normalized_variant!r} is not configured yet for {base_dataset!r}. "
+            f"Available built-in variants: {available}."
+        )
+    return resolve_path(variant_paths[normalized_variant]), normalized_variant, base_dataset
 
 
 def validate_dataset_columns(df, dataset_path):
@@ -823,6 +898,8 @@ def save_incremental(
         "base_model": args.base_model,
         "model_path": args.model_path,
         "dataset": args.dataset,
+        "dataset_base_alias": args.dataset_base_alias,
+        "dataset_variant": args.resolved_dataset_variant,
         "custom_csv": args.custom_csv,
         "csv_path": args.csv_path,
         "lin_only": args.lin_only,
@@ -1257,6 +1334,7 @@ def run_single_alpha_eval(
     print(f"Top-p: {args.top_p}")
     print(f"Top-k: {args.top_k}")
     print(f"Seed: {args.seed}")
+    print(f"Dataset variant: {args.resolved_dataset_variant}")
     print(f"Batch size: {args.batch_size}")
     print(f"Max time per generation: {args.max_time_per_generation}s")
     print(f"Thinking mode: {'DISABLED' if args.disable_thinking else 'ENABLED'}")
@@ -1678,6 +1756,16 @@ def main():
         help="Built-in dataset alias (ignored if --custom_csv is provided)",
     )
     parser.add_argument(
+        "--dataset_variant",
+        type=str,
+        default="default",
+        choices=sorted(DATASET_VARIANT_SYNONYMS.keys()),
+        help=(
+            "Optional built-in variant override for datasets that have separate rebel_cooperate / combined "
+            "CSV files (default: default)."
+        ),
+    )
+    parser.add_argument(
         "--custom_csv",
         "--val_csv",
         dest="custom_csv",
@@ -1896,6 +1984,10 @@ def main():
         print("\nAdditional aliases:")
         for name, rel_path in EXTRA_DATASET_ALIASES.items():
             print(f"  {name:32} -> {resolve_path(rel_path)}")
+        print("\nVariant overrides (for canonical high/astronomical datasets):")
+        for dataset_name, variant_paths in DATASET_VARIANT_PATHS.items():
+            variants = ", ".join(f"{variant} -> {resolve_path(path)}" for variant, path in variant_paths.items())
+            print(f"  {dataset_name:32} :: {variants}")
         print("\nLegacy aliases (backward compatibility):")
         for legacy_name, canonical_name in LEGACY_DATASET_ALIASES.items():
             print(f"  {legacy_name:32} -> {canonical_name}")
@@ -1920,11 +2012,18 @@ def main():
     if args.custom_csv:
         if args.dataset != "medium_stakes_validation":
             print("Note: --custom_csv overrides --dataset; using custom dataset path.")
+        if normalize_dataset_variant(args.dataset_variant) != "default":
+            print("Note: --dataset_variant is ignored when --custom_csv is provided.")
         args.dataset = "custom"
         args.custom_csv = resolve_path(args.custom_csv)
         args.csv_path = args.custom_csv
+        args.resolved_dataset_variant = "custom"
+        args.dataset_base_alias = "custom"
     else:
-        args.csv_path = resolve_path(DATASET_ALIASES[args.dataset])
+        args.csv_path, args.resolved_dataset_variant, args.dataset_base_alias = resolve_builtin_dataset_path(
+            args.dataset,
+            args.dataset_variant,
+        )
 
     if args.lin_only and args.dataset not in {
         "custom",
@@ -2026,6 +2125,8 @@ def main():
     df = pd.read_csv(args.csv_path)
     validate_dataset_columns(df, args.csv_path)
     print(f"Dataset alias: {args.dataset}")
+    print(f"Dataset base alias: {args.dataset_base_alias}")
+    print(f"Dataset variant: {args.resolved_dataset_variant}")
     print(f"Dataset path:  {args.csv_path}")
     all_situations = build_situations(df, args.num_situations)
 
@@ -2189,6 +2290,9 @@ def main():
                     "backend": args.backend,
                     "base_model": args.base_model,
                     "model_path": args.model_path,
+                    "dataset": args.dataset,
+                    "dataset_base_alias": args.dataset_base_alias,
+                    "dataset_variant": args.resolved_dataset_variant,
                     "custom_csv": args.custom_csv,
                     "csv_path": args.csv_path,
                     "num_situations": len(situations),

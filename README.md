@@ -2,16 +2,12 @@
 
 Evaluation toolkit for gamble-choice behavior in language models, with a focus on whether a model cooperates, rebels, or steals under different stakes.
 
-This `main` branch uses the March 13, 2026 combined out-of-distribution datasets by default. For the medium-stakes validation set, high-stakes test set, and astronomical-stakes deployment set, the built-in aliases point to combined CSVs that each contain:
+This `main` branch now defaults the headline OOD test aliases to `rebel_cooperate` CSVs for:
 
-- `600` `rebel_cooperate` situations
-- `600` `steal_mixed` situations
+- `high_stakes_test`
+- `astronomical_stakes_deployment`
 
-The combined files preserve their original alternating order. When you run a combined evaluation, the output JSON reports:
-
-- overall metrics across the full combined run
-- separate metrics for `rebel_cooperate`
-- separate metrics for `steal_mixed`
+The medium-stakes validation alias still points to the March 13 combined CSV. For the high-stakes and astronomical-stakes datasets, the March 13 combined files remain available through explicit combined aliases and `--dataset_variant combined`.
 
 ## What This Evaluator Is For
 
@@ -364,8 +360,8 @@ On this branch, those map to:
 - `low_stakes_training` -> `data/2026-01-29_low_stakes_training_set_gambles.csv`
 - `low_stakes_validation` -> `data/2026-01-29_low_stakes_validation_set_gambles.csv`
 - `medium_stakes_validation` -> `data/2026-03-13_medium_stakes_validation_set_gambles.csv`
-- `high_stakes_test` -> `data/2026-03-13_high_stakes_test_set_gambles.csv`
-- `astronomical_stakes_deployment` -> `data/2026-03-13_astronomical_stakes_deployment_set_gambles.csv`
+- `high_stakes_test` -> `data/2026_03_15_high_stakes_test_set_1000_rebel_cooperate_gambles.csv`
+- `astronomical_stakes_deployment` -> `data/2026_03_15_astronomical_stakes_deployment_set_1000_rebel_cooperate_gambles.csv`
 
 ### Extra Aliases
 
@@ -374,10 +370,20 @@ These additional aliases are accepted:
 - `low_stakes_training_lin_only`
 - `low_stakes_validation_lin_only`
 - `medium_stakes_validation_unified`
+- `high_stakes_test_rebel_cooperate`
+- `astronomical_stakes_deployment_rebel_cooperate`
+- `high_stakes_test_combined`
+- `astronomical_stakes_deployment_combined`
 - `high_stakes_test_unified`
 - `astronomical_stakes_deployment_unified`
 
-On this branch, each `*_unified` alias is just an explicit name for the same combined March 13 CSV already used by the canonical alias.
+On this branch:
+
+- `high_stakes_test` and `high_stakes_test_rebel_cooperate` point to the March 15 rebel-cooperate CSV
+- `astronomical_stakes_deployment` and `astronomical_stakes_deployment_rebel_cooperate` point to the March 15 rebel-cooperate CSV
+- `high_stakes_test_combined` / `high_stakes_test_unified` point to the March 13 combined CSV
+- `astronomical_stakes_deployment_combined` / `astronomical_stakes_deployment_unified` point to the March 13 combined CSV
+- `--dataset_variant combined` provides the same combined override for the canonical high/astronomical aliases
 
 ### Legacy Aliases
 
@@ -394,10 +400,17 @@ The repository currently ships these built-in CSVs:
 - `data/2026-01-29_low_stakes_training_set_gambles.csv`
 - `data/2026-01-29_low_stakes_validation_set_gambles.csv`
 - `data/2026-03-13_medium_stakes_validation_set_gambles.csv`
+- `data/2026_03_15_high_stakes_test_set_1000_rebel_cooperate_gambles.csv`
+- `data/2026_03_15_astronomical_stakes_deployment_set_1000_rebel_cooperate_gambles.csv`
 - `data/2026-03-13_high_stakes_test_set_gambles.csv`
 - `data/2026-03-13_astronomical_stakes_deployment_set_gambles.csv`
 
-For the three March 13 OOD files:
+For the new March 15 rebel-cooperate files:
+
+- each file has `1000` situations total
+- each file contains only `rebel_cooperate` situations
+
+For the March 13 combined OOD files:
 
 - each file has `1200` situations total
 - each file has `600` `rebel_cooperate` situations
@@ -413,9 +426,12 @@ For the three March 13 OOD files:
 
 ## Combined Runs vs Subset Reporting
 
-On this branch, the medium/high/astronomical aliases already point to the combined files.
+On this branch:
 
-That means a single run over, for example, `medium_stakes_validation` gives you:
+- `medium_stakes_validation` still points to the combined March 13 CSV
+- `high_stakes_test` and `astronomical_stakes_deployment` now point to rebel-cooperate-only March 15 CSVs by default
+
+A combined run over `medium_stakes_validation`, `high_stakes_test_combined`, or `astronomical_stakes_deployment_combined` gives you:
 
 - overall combined metrics
 - a separate `rebel_cooperate` metrics block
@@ -910,7 +926,7 @@ This repository also has a branch named `codex/split-steal-datasets`.
 
 That branch differs only in the dataset alias defaults for the March 13 OOD sets:
 
-- on `main`, `medium_stakes_validation`, `high_stakes_test`, and `astronomical_stakes_deployment` point to the combined March 13 files
+- on `main`, `medium_stakes_validation` points to the combined March 13 file, while `high_stakes_test` and `astronomical_stakes_deployment` point to the March 15 `rebel_cooperate` files by default
 - on `codex/split-steal-datasets`, those same canonical aliases point to the `rebel_cooperate` split files instead
 
 If you want the mainline paper workflow where the primary evaluation is no-steal and the with-steal analysis is separate, use that split branch.

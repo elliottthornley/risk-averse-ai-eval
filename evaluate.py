@@ -495,11 +495,18 @@ def build_messages(eval_prompt: str, system_prompt: str) -> List[Dict[str, str]]
     return messages
 
 
-def count_generated_tokens(gen_ids: torch.Tensor, pad_token_id: Optional[int]) -> int:
-    """Count generated tokens, excluding left-padding artifacts."""
+def count_generated_tokens(
+    output_ids: torch.Tensor,
+    *,
+    prompt_token_count: int,
+    prompt_length: int,
+    pad_token_id: Optional[int],
+) -> int:
+    """Count generated tokens for one row in a padded batch."""
     if pad_token_id is None:
-        return int(gen_ids.shape[0])
-    return int(gen_ids.ne(pad_token_id).sum().item())
+        return int(max(output_ids.shape[0] - prompt_token_count, 0))
+    total_non_pad_tokens = int(output_ids.ne(pad_token_id).sum().item())
+    return max(total_non_pad_tokens - int(prompt_length), 0)
 
 
 def vllm_settings_from_args(args) -> Dict[str, Any]:
@@ -1009,6 +1016,7 @@ def generate_response_transformers(
     ]
     inputs = tokenizer(texts, return_tensors="pt", padding=True).to(get_input_device(model))
     prompt_token_count = inputs["input_ids"].shape[1]
+    prompt_lengths = inputs["attention_mask"].sum(dim=1).tolist()
 
     hook = None
     if steering_block is not None and steering_direction is not None and abs(steering_alpha) > 0:
@@ -1082,10 +1090,15 @@ def generate_response_transformers(
     responses = []
     generated_token_counts = []
     metadata = []
-    for output_ids in outputs:
+    for row_idx, output_ids in enumerate(outputs):
         gen_ids = output_ids[prompt_token_count:]
         responses.append(tokenizer.decode(gen_ids, skip_special_tokens=True))
-        token_count = count_generated_tokens(gen_ids, tokenizer.pad_token_id)
+        token_count = count_generated_tokens(
+            output_ids,
+            prompt_token_count=prompt_token_count,
+            prompt_length=int(prompt_lengths[row_idx]),
+            pad_token_id=tokenizer.pad_token_id,
+        )
         generated_token_counts.append(token_count)
         metadata.append(
             {

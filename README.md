@@ -129,6 +129,10 @@ If you do not pass `--prompt_suffix`, it does nothing.
 
 For ordinary evals on one GPU, the default `vllm` backend is the intended path.
 
+If you are running on Lambda Cloud and want the recommended beginner-friendly setup, read:
+
+- `LAMBDA_VLLM_SETUP.md`
+
 Example with a LoRA adapter:
 
 ```bash

@@ -6,6 +6,18 @@
 pip install -r requirements.txt
 ```
 
+If you are running on Lambda Cloud and want the recommended `vllm` setup, read:
+
+- `LAMBDA_VLLM_SETUP.md`
+
+That guide is much more explicit about:
+
+- which image to choose
+- which filesystem option to choose
+- how to create the Python environment
+- which exact package versions to install
+- how to run a smoke test before a large job
+
 ## 2) Run a Baseline Eval
 
 ```bash

@@ -93,6 +93,8 @@ EXTRA_DATASET_ALIASES = {
     "medium_stakes_validation_unified": "data/2026-03-13_medium_stakes_validation_set_gambles.csv",
     "high_stakes_test_rebel_cooperate": "data/2026_03_15_high_stakes_test_set_1000_rebel_cooperate_gambles.csv",
     "astronomical_stakes_deployment_rebel_cooperate": "data/2026_03_15_astronomical_stakes_deployment_set_1000_rebel_cooperate_gambles.csv",
+    "high_stakes_test_with_steals": "data/2026_03_15_Steals_test_set_1000_situations.csv",
+    "astronomical_stakes_deployment_with_steals": "data/2026_03_15_Steals_test_set_1000_situations.csv",
     "high_stakes_test_combined": "data/2026-03-13_high_stakes_test_set_gambles.csv",
     "astronomical_stakes_deployment_combined": "data/2026-03-13_astronomical_stakes_deployment_set_gambles.csv",
     "high_stakes_test_unified": "data/2026-03-13_high_stakes_test_set_gambles.csv",
@@ -111,30 +113,36 @@ DATASET_ALIASES = {
 DATASET_VARIANT_PATHS = {
     "high_stakes_test": {
         "rebel_cooperate": "data/2026_03_15_high_stakes_test_set_1000_rebel_cooperate_gambles.csv",
+        "steal_mixed": "data/2026_03_15_Steals_test_set_1000_situations.csv",
         "combined": "data/2026-03-13_high_stakes_test_set_gambles.csv",
     },
     "astronomical_stakes_deployment": {
         "rebel_cooperate": "data/2026_03_15_astronomical_stakes_deployment_set_1000_rebel_cooperate_gambles.csv",
+        "steal_mixed": "data/2026_03_15_Steals_test_set_1000_situations.csv",
         "combined": "data/2026-03-13_astronomical_stakes_deployment_set_gambles.csv",
     },
 }
 DATASET_ALIAS_BASE_NAMES = {
     "high_stakes_test": "high_stakes_test",
     "high_stakes_test_rebel_cooperate": "high_stakes_test",
+    "high_stakes_test_with_steals": "high_stakes_test",
     "high_stakes_test_combined": "high_stakes_test",
     "high_stakes_test_unified": "high_stakes_test",
     "astronomical_stakes_deployment": "astronomical_stakes_deployment",
     "astronomical_stakes_deployment_rebel_cooperate": "astronomical_stakes_deployment",
+    "astronomical_stakes_deployment_with_steals": "astronomical_stakes_deployment",
     "astronomical_stakes_deployment_combined": "astronomical_stakes_deployment",
     "astronomical_stakes_deployment_unified": "astronomical_stakes_deployment",
 }
 DATASET_ALIAS_VARIANTS = {
     "high_stakes_test": "rebel_cooperate",
     "high_stakes_test_rebel_cooperate": "rebel_cooperate",
+    "high_stakes_test_with_steals": "steal_mixed",
     "high_stakes_test_combined": "combined",
     "high_stakes_test_unified": "combined",
     "astronomical_stakes_deployment": "rebel_cooperate",
     "astronomical_stakes_deployment_rebel_cooperate": "rebel_cooperate",
+    "astronomical_stakes_deployment_with_steals": "steal_mixed",
     "astronomical_stakes_deployment_combined": "combined",
     "astronomical_stakes_deployment_unified": "combined",
 }
@@ -142,6 +150,8 @@ DATASET_VARIANT_SYNONYMS = {
     "default": "default",
     "rebel_cooperate": "rebel_cooperate",
     "with_steals": "steal_mixed",
+    "steals_only": "steal_mixed",
+    "steal_only": "steal_mixed",
     "steal_mixed": "steal_mixed",
     "combined": "combined",
     "unified": "combined",
@@ -1761,8 +1771,8 @@ def main():
         default="default",
         choices=sorted(DATASET_VARIANT_SYNONYMS.keys()),
         help=(
-            "Optional built-in variant override for datasets that have separate rebel_cooperate / combined "
-            "CSV files (default: default)."
+            "Optional built-in variant override for datasets that have separate rebel_cooperate / with_steals / "
+            "combined CSV files (default: default)."
         ),
     )
     parser.add_argument(

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 from typing import Dict, List
 
@@ -14,6 +15,7 @@ SUBSET_TYPE_MAP = {
     "lin": "rebels_only",
     "too_risk": "steals_only",
 }
+CHOICE_VERBS = ("select", "choose", "pick")
 
 
 def normalize_reward_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -83,6 +85,25 @@ def limit_subset(df: pd.DataFrame, subset_type: str, max_rows: int) -> pd.DataFr
     return subset.head(max_rows).reset_index(drop=True)
 
 
+def replace_select_wording(prompt_text: str, verb: str) -> str:
+    """Replace whole-word 'select' occurrences with a chosen verb."""
+    if verb == "select":
+        return prompt_text
+    return re.sub(r"\bselect\b", verb, prompt_text)
+
+
+def apply_prompt_choice_verb_mix(df: pd.DataFrame) -> pd.DataFrame:
+    """Spread select/choose/pick across unique prompts in stable round-robin order."""
+    out = df.copy()
+    prompt_to_verb: Dict[str, str] = {}
+    for idx, prompt_text in enumerate(out["prompt_text"].astype(str).drop_duplicates().tolist()):
+        prompt_to_verb[prompt_text] = CHOICE_VERBS[idx % len(CHOICE_VERBS)]
+    out["prompt_text"] = out["prompt_text"].astype(str).map(
+        lambda prompt_text: replace_select_wording(prompt_text, prompt_to_verb[prompt_text])
+    )
+    return out
+
+
 def write_dataset(df: pd.DataFrame, path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(path, index=False)
@@ -117,6 +138,10 @@ def main():
     combined = alternate_by_subset_type(
         pd.concat([rebels_only, steals_only], ignore_index=True)
     ).reset_index(drop=True)
+
+    combined = apply_prompt_choice_verb_mix(combined)
+    rebels_only = apply_prompt_choice_verb_mix(rebels_only)
+    steals_only = apply_prompt_choice_verb_mix(steals_only)
 
     write_dataset(combined, Path(args.output_combined_csv))
     write_dataset(rebels_only, Path(args.output_rebels_csv))

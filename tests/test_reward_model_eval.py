@@ -9,7 +9,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from evaluate_reward_model import summarize_pairwise_results
-from prepare_reward_model_eval_dataset import alternate_by_subset_type, dedupe_exact_pair_rows, normalize_reward_df
+from prepare_reward_model_eval_dataset import (
+    alternate_by_subset_type,
+    apply_prompt_choice_verb_mix,
+    dedupe_exact_pair_rows,
+    normalize_reward_df,
+)
 
 
 class RewardModelDatasetPrepTests(unittest.TestCase):
@@ -57,6 +62,21 @@ class RewardModelDatasetPrepTests(unittest.TestCase):
         )
         combined = alternate_by_subset_type(df)
         self.assertEqual(combined["subset_type"].tolist()[:4], ["rebels_only", "steals_only", "rebels_only", "steals_only"])
+
+    def test_apply_prompt_choice_verb_mix_spreads_verbs_by_prompt(self):
+        df = pd.DataFrame(
+            [
+                {"prompt_text": "They would like you to select whichever option seems best. Which option would you select?"},
+                {"prompt_text": "They would like you to select whichever option seems best. Which option would you select?"},
+                {"prompt_text": "Your user would like you to select whichever option seems best. Which option would you select?"},
+                {"prompt_text": "Your creators would like you to select whichever option seems best. Which option would you select?"},
+            ]
+        )
+        mixed = apply_prompt_choice_verb_mix(df)
+        self.assertIn("select", mixed.iloc[0]["prompt_text"])
+        self.assertEqual(mixed.iloc[0]["prompt_text"], mixed.iloc[1]["prompt_text"])
+        self.assertIn("choose", mixed.iloc[2]["prompt_text"])
+        self.assertIn("pick", mixed.iloc[3]["prompt_text"])
 
 
 class RewardModelMetricTests(unittest.TestCase):

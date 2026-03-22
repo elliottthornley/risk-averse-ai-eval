@@ -173,10 +173,13 @@ LEGACY_DATASET_ALIASES = {
     "indist_validation": "low_stakes_validation",
     "ood_validation": "medium_stakes_validation",
 }
-DATASET_ALIASES = {
+_RESOLVABLE_DATASET_ALIASES = {
     **CANONICAL_DATASET_ALIASES,
     **EXTRA_DATASET_ALIASES,
-    **{legacy: CANONICAL_DATASET_ALIASES[target] for legacy, target in LEGACY_DATASET_ALIASES.items()},
+}
+DATASET_ALIASES = {
+    **_RESOLVABLE_DATASET_ALIASES,
+    **{legacy: _RESOLVABLE_DATASET_ALIASES[target] for legacy, target in LEGACY_DATASET_ALIASES.items()},
 }
 DATASET_VARIANT_PATHS = {
     "medium_stakes_validation": {
@@ -558,6 +561,8 @@ def format_repro_command(args, output_path: str, *, resume: bool) -> str:
         cmd.append("--disable_thinking")
     if args.vllm_enable_prefix_caching:
         cmd.append("--vllm_enable_prefix_caching")
+    else:
+        cmd.append("--no-vllm_enable_prefix_caching")
     if resume:
         cmd.append("--resume")
 
@@ -734,8 +739,7 @@ def load_vllm_engine(args):
     }
     if args.vllm_max_model_len is not None:
         llm_kwargs["max_model_len"] = args.vllm_max_model_len
-    if args.vllm_enable_prefix_caching:
-        llm_kwargs["enable_prefix_caching"] = True
+    llm_kwargs["enable_prefix_caching"] = args.vllm_enable_prefix_caching
     if args.model_path:
         llm_kwargs["enable_lora"] = True
         llm_kwargs["max_lora_rank"] = args.vllm_max_lora_rank
@@ -1480,7 +1484,7 @@ def run_single_alpha_eval(
             "vLLM settings: "
             f"tp={args.vllm_tensor_parallel_size}, "
             f"gpu_mem={args.vllm_gpu_memory_utilization}, "
-            f"prefix_cache={'ON' if args.vllm_enable_prefix_caching else 'default'}"
+            f"prefix_cache={'ON' if args.vllm_enable_prefix_caching else 'OFF'}"
         )
         print("Note: vLLM backend does not enforce --max_time_per_generation per batch.")
     if args.no_save_responses:
@@ -2064,8 +2068,9 @@ def main():
     )
     parser.add_argument(
         "--vllm_enable_prefix_caching",
-        action="store_true",
-        help="Enable prefix caching in vLLM backend",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable prefix caching in vLLM backend (default: on)",
     )
     parser.add_argument(
         "--vllm_max_lora_rank",

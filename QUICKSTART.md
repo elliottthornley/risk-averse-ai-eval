@@ -80,6 +80,8 @@ python evaluate.py \
 
 Use the same `evaluate.py` entrypoint, but switch to the `transformers` backend.
 
+Thinking is still enabled by default in steering runs unless you explicitly pass `--disable_thinking`.
+
 ```bash
 python evaluate.py \
   --backend transformers \
@@ -105,6 +107,12 @@ python evaluate_reward_model.py \
   --batch_size 16 \
   --output reward_model_eval.json
 ```
+
+Current reward-model dataset aliases:
+
+- `reward_model_validation` -> current `500`-pair `rebels_only` validation split
+- `reward_model_validation_steals_only` -> current `167`-pair `steals_only` validation split
+- `reward_model_validation_combined_rebels_and_steals` -> current combined `667`-pair validation split
 
 ## Save / Resume
 

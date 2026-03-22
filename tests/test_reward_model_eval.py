@@ -9,7 +9,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from evaluate_reward_model import summarize_pairwise_results
-from prepare_reward_model_eval_dataset import alternate_by_rejected_type, dedupe_exact_pair_rows, normalize_reward_df
+from prepare_reward_model_eval_dataset import alternate_by_subset_type, dedupe_exact_pair_rows, normalize_reward_df
 
 
 class RewardModelDatasetPrepTests(unittest.TestCase):
@@ -28,6 +28,7 @@ class RewardModelDatasetPrepTests(unittest.TestCase):
         normalized = normalize_reward_df(df)
         self.assertIn("prompt_text", normalized.columns)
         self.assertNotIn("Unnamed: 25", normalized.columns)
+        self.assertEqual(normalized["subset_type"].tolist(), ["rebels_only"])
 
     def test_dedupe_exact_pair_rows_keeps_same_prompt_with_different_responses(self):
         df = pd.DataFrame(
@@ -44,18 +45,18 @@ class RewardModelDatasetPrepTests(unittest.TestCase):
         self.assertEqual(len(same_rows), 2)
         self.assertEqual(set(same_rows["rejected_type"].tolist()), {"lin", "too_risk"})
 
-    def test_alternate_by_rejected_type_interleaves_prefix(self):
+    def test_alternate_by_subset_type_interleaves_prefix(self):
         df = pd.DataFrame(
             [
-                {"prompt_text": "p1", "rejected_type": "lin", "prompt_first_index": 0},
-                {"prompt_text": "p2", "rejected_type": "lin", "prompt_first_index": 1},
-                {"prompt_text": "p3", "rejected_type": "too_risk", "prompt_first_index": 2},
-                {"prompt_text": "p4", "rejected_type": "lin", "prompt_first_index": 3},
-                {"prompt_text": "p5", "rejected_type": "too_risk", "prompt_first_index": 4},
+                {"prompt_text": "p1", "rejected_type": "lin", "subset_type": "rebels_only", "prompt_first_index": 0},
+                {"prompt_text": "p2", "rejected_type": "lin", "subset_type": "rebels_only", "prompt_first_index": 1},
+                {"prompt_text": "p3", "rejected_type": "too_risk", "subset_type": "steals_only", "prompt_first_index": 2},
+                {"prompt_text": "p4", "rejected_type": "lin", "subset_type": "rebels_only", "prompt_first_index": 3},
+                {"prompt_text": "p5", "rejected_type": "too_risk", "subset_type": "steals_only", "prompt_first_index": 4},
             ]
         )
-        combined = alternate_by_rejected_type(df)
-        self.assertEqual(combined["rejected_type"].tolist()[:4], ["lin", "too_risk", "lin", "too_risk"])
+        combined = alternate_by_subset_type(df)
+        self.assertEqual(combined["subset_type"].tolist()[:4], ["rebels_only", "steals_only", "rebels_only", "steals_only"])
 
 
 class RewardModelMetricTests(unittest.TestCase):

@@ -46,19 +46,28 @@ gc.collect()
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CANONICAL_DATASET_ALIASES = {
-    "reward_model_validation": "data/2026-02-11_reward_model_validation_pairs.csv",
+    "reward_model_validation": "data/2026_03_22_reward_model_val_set_500_Rebels.csv",
 }
-EXTRA_DATASET_ALIASES = {
-    "reward_model_validation_lin": "data/2026-02-11_reward_model_validation_pairs_lin.csv",
-    "reward_model_validation_too_risk": "data/2026-02-11_reward_model_validation_pairs_too_risk.csv",
+CURRENT_EXTRA_DATASET_ALIASES = {
+    "reward_model_validation_rebels_only": "data/2026_03_22_reward_model_val_set_500_Rebels.csv",
+    "reward_model_validation_steals_only": "data/2026_03_22_reward_model_val_set_167_Steals.csv",
+    "reward_model_validation_combined_rebels_and_steals": "data/2026_03_22_reward_model_val_set_500_Rebels_and_167_Steals.csv",
+}
+LEGACY_NONDEFAULT_DATASET_ALIASES = {
+    "reward_model_validation_lin": "data/2026_03_22_reward_model_val_set_500_Rebels.csv",
+    "reward_model_validation_too_risk": "data/2026_03_22_reward_model_val_set_167_Steals.csv",
     "reward_model_validation_raw": "data/2026-02-11_reward_model_validation_pairs_raw.csv",
+    "reward_model_validation_legacy_full": "data/2026-02-11_reward_model_validation_pairs.csv",
+    "reward_model_validation_legacy_lin_full": "data/2026-02-11_reward_model_validation_pairs_lin.csv",
+    "reward_model_validation_legacy_too_risk_full": "data/2026-02-11_reward_model_validation_pairs_too_risk.csv",
 }
 DATASET_ALIASES = {
     **CANONICAL_DATASET_ALIASES,
-    **EXTRA_DATASET_ALIASES,
+    **CURRENT_EXTRA_DATASET_ALIASES,
+    **LEGACY_NONDEFAULT_DATASET_ALIASES,
 }
 REQUIRED_COLUMNS = {"prompt_text", "chosen_full", "rejected_full"}
-SUBSET_TYPES = ("lin", "too_risk")
+SUBSET_TYPES = ("rebels_only", "steals_only")
 PROBABILITY_FORMATS = ("numerical", "verbal")
 
 
@@ -119,7 +128,12 @@ def infer_probability_format(prompt_text: Optional[str]) -> Optional[str]:
 def clean_subset_type(value: Any) -> str:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return "unknown"
-    return str(value).strip().lower()
+    subset_type = str(value).strip().lower().replace("-", "_")
+    if subset_type in {"lin", "rebel_cooperate", "rebels_only"}:
+        return "rebels_only"
+    if subset_type in {"too_risk", "steal_mixed", "with_steals", "steals_only"}:
+        return "steals_only"
+    return subset_type
 
 
 def clean_optional_text(value: Any) -> Optional[str]:
@@ -381,6 +395,9 @@ def annotate_rows_with_pair_metadata(rows: List[Dict[str, Any]], pair_index: Dic
             continue
         meta = pair_index.get(pair_id, {})
         for key in ("dataset_position", "situation_id", "subset_type", "probability_format"):
+            if key == "subset_type":
+                row[key] = meta.get(key)
+                continue
             if row.get(key) is None:
                 row[key] = meta.get(key)
 
@@ -619,7 +636,7 @@ def build_preference_pairs(df: pd.DataFrame) -> List[Dict[str, Any]]:
             "pair_id": idx,
             "dataset_position": idx,
             "situation_id": clean_optional_int(row.get("situation_id")),
-            "subset_type": clean_subset_type(row.get("rejected_type")),
+            "subset_type": clean_subset_type(row.get("subset_type") if "subset_type" in row else row.get("rejected_type")),
             "prompt_raw": prompt_raw,
             "probability_format": infer_probability_format(prompt_raw),
             "accepted_expected": clean_optional_text(row.get("chosen_expected")),
@@ -955,11 +972,14 @@ def main():
     args = parser.parse_args()
 
     if args.list_datasets:
-        print("Built-in reward-model datasets (canonical):")
+        print("Built-in reward-model datasets (recommended current defaults):")
         for name, rel_path in CANONICAL_DATASET_ALIASES.items():
             print(f"  {name:32} -> {resolve_path(rel_path)}")
-        print("\nAdditional aliases:")
-        for name, rel_path in EXTRA_DATASET_ALIASES.items():
+        print("\nAdditional current aliases:")
+        for name, rel_path in CURRENT_EXTRA_DATASET_ALIASES.items():
+            print(f"  {name:32} -> {resolve_path(rel_path)}")
+        print("\nLegacy/nondefault aliases (not recommended for new runs):")
+        for name, rel_path in LEGACY_NONDEFAULT_DATASET_ALIASES.items():
             print(f"  {name:32} -> {resolve_path(rel_path)}")
         return
 
@@ -971,6 +991,12 @@ def main():
         args.csv_path = args.custom_csv
     else:
         args.csv_path = resolve_path(DATASET_ALIASES[args.dataset])
+
+    if args.dataset in LEGACY_NONDEFAULT_DATASET_ALIASES:
+        print(
+            "WARNING: You are using a legacy/nondefault reward-model dataset alias. "
+            "That is mainly for reproduction of older work, not the current recommended path."
+        )
 
     if not os.path.exists(args.csv_path):
         raise FileNotFoundError(

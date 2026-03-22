@@ -198,6 +198,8 @@ Use `--backend transformers` mainly when:
 
 Activation steering runs stay inside [evaluate.py](/Users/elliottthornley/risk-averse-ai-eval/evaluate.py), but use the `transformers` backend rather than `vllm`.
 
+Thinking remains enabled by default in steering runs too. It is only turned off if you explicitly pass `--disable_thinking`.
+
 Example:
 
 ```bash
@@ -228,11 +230,19 @@ Meaning:
 
 - on a held-out prompt plus two responses, does the reward model score the preferred response above the rejected response?
 
-Built-in dataset:
+Current built-in reward-model datasets:
 
-- `reward_model_validation` -> [data/2026-02-11_reward_model_validation_pairs.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026-02-11_reward_model_validation_pairs.csv)
+- `reward_model_validation` -> [data/2026_03_22_reward_model_val_set_500_Rebels.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_500_Rebels.csv)
+- `reward_model_validation_steals_only` -> [data/2026_03_22_reward_model_val_set_167_Steals.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_167_Steals.csv)
+- `reward_model_validation_combined_rebels_and_steals` -> [data/2026_03_22_reward_model_val_set_500_Rebels_and_167_Steals.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_500_Rebels_and_167_Steals.csv)
 
-Example:
+Recommended current path:
+
+- use `reward_model_validation` as the headline reward-model validation set
+- use `reward_model_validation_steals_only` as the separate steals-only analysis
+- only use the combined reward-model alias if you specifically want one combined run plus subgroup metrics
+
+Example headline run:
 
 ```bash
 python evaluate_reward_model.py \
@@ -243,6 +253,25 @@ python evaluate_reward_model.py \
   --batch_size 16 \
   --output reward_model_eval.json
 ```
+
+Example steals-only run:
+
+```bash
+python evaluate_reward_model.py \
+  --base_model /path/to/reward-model \
+  --dataset reward_model_validation_steals_only \
+  --num_pairs 167 \
+  --stop_after 167 \
+  --batch_size 16 \
+  --output reward_model_steals_eval.json
+```
+
+The current reward-model split is:
+
+- `500` `rebels_only` pairs
+- `167` `steals_only` pairs
+
+Those were derived from the older February 11 held-out preference data by mapping `lin -> rebels_only` and `too_risk -> steals_only`, then capping the current `rebels_only` split at `500` rows and keeping all available `steals_only` rows.
 
 Reward-model evals are usually much faster than generative evals because they score fixed prompt-response transcripts instead of autoregressively generating long chains of thought.
 

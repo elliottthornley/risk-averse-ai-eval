@@ -35,7 +35,9 @@ Deprecated / legacy:
 - [data/2026_03_22_high_stakes_test_set_1000_Rebels.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_high_stakes_test_set_1000_Rebels.csv)
 - [data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv)
 - [data/2026_03_22_test_set_1000_Steals.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_test_set_1000_Steals.csv)
-- [data/2026-02-11_reward_model_validation_pairs.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026-02-11_reward_model_validation_pairs.csv)
+- [data/2026_03_22_reward_model_val_set_500_Rebels.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_500_Rebels.csv)
+- [data/2026_03_22_reward_model_val_set_167_Steals.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_167_Steals.csv)
+- [data/2026_03_22_reward_model_val_set_500_Rebels_and_167_Steals.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_500_Rebels_and_167_Steals.csv)
 
 Legacy/nondefault CSVs are under [data/legacy_nondefault](/Users/elliottthornley/risk-averse-ai-eval/data/legacy_nondefault) and should not be used for new runs unless someone is reproducing an older result.
 

@@ -64,18 +64,21 @@ cp -r /path/to/risk_averse_eval_package_mod "/path/to/shared/drive/"
 - `DATA_LICENSE.md` - Data licensing summary (CC BY 4.0)
 - `LICENSE-CC-BY-4.0.txt` - Full CC BY 4.0 legal code
 - `QUICKSTART.md` - Quick start guide
+- `LAMBDA_VLLM_SETUP.md` - Lambda GPU setup guide
+- `VERTEX_WORKBENCH_VLLM_SETUP.md` - Vertex AI Workbench GPU setup guide
 - `SCRIPT_COMPARISON.md` - Detailed comparison of evaluation scripts
 - `evaluate.py` - Main evaluation script (recommended) ⭐
 - `evaluate_comprehensive.py` - Multi-metric evaluation for research
 - `requirements.txt` - Python dependencies
 - `example_usage.sh` - Example script showing all evaluations
-- `data/2026-03-13_medium_stakes_validation_set_gambles.csv` - OOD validation dataset (balanced `rebel_cooperate` / `steal_mixed`)
-- `data/2026-03-13_high_stakes_test_set_gambles.csv` - OOD high-stakes test set
-- `data/2026-03-13_astronomical_stakes_deployment_set_gambles.csv` - OOD astronomical-stakes deployment set
-- `data/in_distribution_val_set.csv` - In-distribution validation (154KB)
-- `data/training_eval_set.csv` - Training set evaluation (1.5MB)
+- `data/2026_03_22_medium_stakes_val_set_500_Rebels.csv` - Current default medium-stakes rebel-only eval set
+- `data/2026_03_22_medium_stakes_val_set_500_steals.csv` - Medium-stakes steals-only alternative
+- `data/2026_03_22_high_stakes_test_set_1000_Rebels.csv` - Current default high-stakes rebel-only eval set
+- `data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv` - Current default astronomical-stakes rebel-only eval set
+- `data/2026_03_22_test_set_1000_Steals.csv` - Shared steals-only test set for high/astronomical analyses
+- `data/legacy_nondefault/` - Older nondefault OOD CSVs retained for comparison
 
-**Total package size:** ~17MB (mostly CSV data)
+**Total package size:** varies by included CSV history, mostly from the dataset files
 
 ## What Your Team Should Do First
 

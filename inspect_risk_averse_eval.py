@@ -242,7 +242,7 @@ def steal_rate_scorer():
 
 @task
 def risk_averse_eval(
-    custom_csv: str = "data/2026-03-13_medium_stakes_validation_set_gambles.csv",
+    custom_csv: str = "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
     num_situations: int = 50,
     prompt_suffix: str = "",
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,

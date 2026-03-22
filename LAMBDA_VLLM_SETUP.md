@@ -101,6 +101,8 @@ Why this matters:
 
 Before running a large evaluation, test a small one.
 
+In this guide, the examples use the current default `medium_stakes_validation` dataset, which is the March 22 rebel-only medium-stakes CSV with `500` situations total.
+
 Run:
 
 ```bash
@@ -129,7 +131,7 @@ python evaluate.py \
   --backend vllm \
   --base_model Qwen/Qwen3-8B \
   --dataset medium_stakes_validation \
-  --num_situations 1200 \
+  --num_situations 500 \
   --stop_after 50 \
   --batch_size 4 \
   --output medium_vllm.json
@@ -172,7 +174,7 @@ python evaluate.py \
   --backend vllm \
   --base_model Qwen/Qwen3-8B \
   --dataset medium_stakes_validation \
-  --num_situations 1200 \
+  --num_situations 500 \
   --stop_after 50 \
   --batch_size 4 \
   --save_every 1 \
@@ -218,7 +220,7 @@ python evaluate.py \
   --backend vllm \
   --base_model Qwen/Qwen3-8B \
   --dataset medium_stakes_validation \
-  --num_situations 1200 \
+  --num_situations 500 \
   --stop_after 50 \
   --batch_size 4 \
   --resume \
@@ -258,7 +260,7 @@ python evaluate.py \
   --backend vllm \
   --base_model Qwen/Qwen3-8B \
   --dataset medium_stakes_validation \
-  --num_situations 1200 \
+  --num_situations 500 \
   --stop_after 50 \
   --batch_size 4 \
   --resume \

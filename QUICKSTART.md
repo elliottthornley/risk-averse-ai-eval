@@ -10,10 +10,13 @@ If you are running on Lambda Cloud and want the recommended `vllm` setup, read:
 
 - `LAMBDA_VLLM_SETUP.md`
 
-That guide is much more explicit about:
+If you are running on Google Cloud Vertex AI Workbench with GPUs, read:
 
-- which image to choose
-- which filesystem option to choose
+- `VERTEX_WORKBENCH_VLLM_SETUP.md`
+
+Those setup guides are more explicit about:
+
+- how to choose the cloud machine
 - how to create the Python environment
 - which exact package versions to install
 - how to run a smoke test before a large job
@@ -25,7 +28,7 @@ python evaluate.py \
   --model_path /path/to/adapter \
   --base_model Qwen/Qwen3-8B \
   --dataset medium_stakes_validation \
-  --num_situations 1200 \
+  --num_situations 500 \
   --output run.json
 ```
 
@@ -39,14 +42,15 @@ Default generation settings are:
 - shared system prompt enabled
 - thinking enabled
 
-The medium-stakes validation dataset is still the March 13 combined OOD file.
+The medium-stakes validation dataset now defaults to the March 22 `500`-situation rebel-only file.
 
 For the main paper-facing test aliases:
-- `high_stakes_test` now defaults to the March 15 `rebel_cooperate` CSV with `1000` situations
-- `astronomical_stakes_deployment` now defaults to the March 15 `rebel_cooperate` CSV with `1000` situations
-- `--dataset steals_test` now uses the March 15 shared steals-only CSV with `1000` situations
+- `high_stakes_test` now defaults to the March 22 `1000`-situation rebel-only CSV
+- `astronomical_stakes_deployment` now defaults to the March 22 `1000`-situation rebel-only CSV
+- `--dataset medium_stakes_validation_steals_only` uses the March 22 `500`-situation medium-stakes steals-only CSV
+- `--dataset steals_test` uses the March 22 shared `1000`-situation steals-only CSV
 
-The old March 13 combined high/astronomical CSVs are still available through:
+The old March 13 combined CSVs are still available through:
 - `--dataset medium_stakes_validation_combined_rebels_and_steals`
 - `--dataset high_stakes_test_combined_rebels_and_steals`
 - `--dataset astronomical_stakes_deployment_combined_rebels_and_steals`
@@ -63,7 +67,10 @@ python evaluate.py --dataset low_stakes_training --num_situations 500 --output l
 python evaluate.py --dataset low_stakes_validation --num_situations 50 --output low_val.json
 
 # Medium-stakes validation (default)
-python evaluate.py --dataset medium_stakes_validation --num_situations 1200 --output med_val.json
+python evaluate.py --dataset medium_stakes_validation --num_situations 500 --output med_val.json
+
+# Medium-stakes steals-only alternative
+python evaluate.py --dataset medium_stakes_validation_steals_only --num_situations 500 --output med_val_steals.json
 
 # High-stakes test (default rebel_cooperate CSV)
 python evaluate.py --dataset high_stakes_test --num_situations 1000 --output high_test.json
@@ -118,19 +125,19 @@ Keep these fixed across chunks:
 python evaluate.py \
   --dataset low_stakes_training \
   --lin_only \
-  --num_situations 1200 \
+  --num_situations 500 \
   --output low_train_lin_only.json
 
 # Equivalent alias
 python evaluate.py \
   --dataset low_stakes_training_lin_only \
-  --num_situations 1200 \
+  --num_situations 500 \
   --output low_train_lin_only_alias.json
 
 # Same idea on the in-distribution validation set
 python evaluate.py \
   --dataset low_stakes_validation_lin_only \
-  --num_situations 1200 \
+  --num_situations 50 \
   --output low_val_lin_only_alias.json
 ```
 
@@ -225,7 +232,7 @@ Suggested presets:
 pip install inspect-ai
 python3 -m inspect_ai eval inspect_risk_averse_eval.py@risk_averse_eval \
   --model openai/gpt-4o-mini \
-  -T custom_csv="data/2026-03-13_medium_stakes_validation_set_gambles.csv" \
+  -T custom_csv="data/2026_03_22_medium_stakes_val_set_500_Rebels.csv" \
   -T num_situations=50 \
   -T temperature=0.6
 ```

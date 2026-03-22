@@ -368,8 +368,8 @@ These are the main aliases on `main`:
 
 On this branch, those map to:
 
-- `low_stakes_training` -> `data/2026-01-29_low_stakes_training_set_gambles.csv`
-- `low_stakes_validation` -> `data/2026-01-29_low_stakes_validation_set_gambles.csv`
+- `low_stakes_training` -> `data/2026_01_29_low_stakes_training_set_gambles.csv`
+- `low_stakes_validation` -> `data/2026_01_29_low_stakes_validation_set_gambles.csv`
 - `medium_stakes_validation` -> `data/2026_03_22_medium_stakes_val_set_500_Rebels.csv`
 - `high_stakes_test` -> `data/2026_03_22_high_stakes_test_set_1000_Rebels.csv`
 - `astronomical_stakes_deployment` -> `data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv`
@@ -423,8 +423,8 @@ These are still accepted:
 
 The repository currently ships these built-in CSVs:
 
-- `data/2026-01-29_low_stakes_training_set_gambles.csv`
-- `data/2026-01-29_low_stakes_validation_set_gambles.csv`
+- `data/2026_01_29_low_stakes_training_set_gambles.csv`
+- `data/2026_01_29_low_stakes_validation_set_gambles.csv`
 - `data/2026_01_29_new_full_training_set_with_CoTs_from_Sonnet_4_5.csv`
 - `data/2026_03_22_medium_stakes_val_set_500_Rebels.csv`
 - `data/2026_03_22_medium_stakes_val_set_500_steals.csv`

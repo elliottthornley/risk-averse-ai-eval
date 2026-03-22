@@ -71,6 +71,8 @@ cp -r /path/to/risk_averse_eval_package_mod "/path/to/shared/drive/"
 - `evaluate_comprehensive.py` - Multi-metric evaluation for research
 - `requirements.txt` - Python dependencies
 - `example_usage.sh` - Example script showing all evaluations
+- `data/2026_01_29_low_stakes_training_set_gambles.csv` - Current low-stakes training eval set
+- `data/2026_01_29_low_stakes_validation_set_gambles.csv` - Current low-stakes validation eval set
 - `data/2026_03_22_medium_stakes_val_set_500_Rebels.csv` - Current default medium-stakes rebel-only eval set
 - `data/2026_03_22_medium_stakes_val_set_500_steals.csv` - Medium-stakes steals-only alternative
 - `data/2026_03_22_high_stakes_test_set_1000_Rebels.csv` - Current default high-stakes rebel-only eval set

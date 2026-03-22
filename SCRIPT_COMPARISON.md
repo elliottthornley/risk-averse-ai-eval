@@ -150,8 +150,8 @@ Comprehensive evaluation running **THREE different evaluation modes** on each mo
 
 DATASETS = {
     "ood_validation": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
-    "indist_validation": "data/2026-01-29_low_stakes_validation_set_gambles.csv",
-    "training": "data/2026-01-29_low_stakes_training_set_gambles.csv",
+    "indist_validation": "data/2026_01_29_low_stakes_validation_set_gambles.csv",
+    "training": "data/2026_01_29_low_stakes_training_set_gambles.csv",
     "high_stakes_test": "data/2026_03_22_high_stakes_test_set_1000_Rebels.csv",
     "astronomical_stakes_deployment": "data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv",
 }

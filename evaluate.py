@@ -134,15 +134,15 @@ gc.collect()
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CANONICAL_DATASET_ALIASES = {
-    "low_stakes_training": "data/2026-01-29_low_stakes_training_set_gambles.csv",
-    "low_stakes_validation": "data/2026-01-29_low_stakes_validation_set_gambles.csv",
+    "low_stakes_training": "data/2026_01_29_low_stakes_training_set_gambles.csv",
+    "low_stakes_validation": "data/2026_01_29_low_stakes_validation_set_gambles.csv",
     "medium_stakes_validation": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
     "high_stakes_test": "data/2026_03_22_high_stakes_test_set_1000_Rebels.csv",
     "astronomical_stakes_deployment": "data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv",
 }
 EXTRA_DATASET_ALIASES = {
-    "low_stakes_training_lin_only": "data/2026-01-29_low_stakes_training_set_gambles.csv",
-    "low_stakes_validation_lin_only": "data/2026-01-29_low_stakes_validation_set_gambles.csv",
+    "low_stakes_training_lin_only": "data/2026_01_29_low_stakes_training_set_gambles.csv",
+    "low_stakes_validation_lin_only": "data/2026_01_29_low_stakes_validation_set_gambles.csv",
     "medium_stakes_validation_rebel_cooperate": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
     "medium_stakes_validation_steals_only": "data/2026_03_22_medium_stakes_val_set_500_steals.csv",
     "medium_stakes_validation_unified": "data/legacy_nondefault/2026-03-13_medium_stakes_validation_set_gambles.csv",

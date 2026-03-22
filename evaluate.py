@@ -46,24 +46,77 @@ except Exception as exc:  # pragma: no cover - optional dependency path
 class ResidualSteeringHook:
     """Simple residual stream steering hook used during generation."""
 
-    def __init__(self, direction: torch.Tensor, alpha: float):
+    def __init__(
+        self,
+        direction: torch.Tensor,
+        alpha: float,
+        apply_mode: str = "last_prompt_and_current",
+        prompt_last_indices: Optional[List[int]] = None,
+    ):
         self.direction = direction
         self.alpha = float(alpha)
+        self.apply_mode = apply_mode
+        self.prompt_last_indices = (
+            None if prompt_last_indices is None else [int(index) for index in prompt_last_indices]
+        )
         self._handle = None
+        self._prefill_seen = False
 
-    def _apply_direction(self, hidden: torch.Tensor) -> torch.Tensor:
+    def _broadcast_direction(self, hidden: torch.Tensor) -> torch.Tensor:
         direction = self.direction.to(device=hidden.device, dtype=hidden.dtype)
         while direction.dim() < hidden.dim():
             direction = direction.unsqueeze(0)
+        return direction
+
+    def _apply_all_positions(self, hidden: torch.Tensor) -> torch.Tensor:
+        direction = self._broadcast_direction(hidden)
         return hidden + (self.alpha * direction)
+
+    def _apply_last_prompt_and_current(self, hidden: torch.Tensor) -> torch.Tensor:
+        if hidden.dim() < 3 or hidden.shape[1] == 0:
+            return self._apply_all_positions(hidden)
+
+        steered = hidden.clone()
+        direction = self.direction.to(device=hidden.device, dtype=hidden.dtype)
+
+        # The first hooked forward pass is the prompt prefill. Steer the final
+        # non-padding prompt token for each example, then fall back to the final
+        # sequence position on later decode steps. With use_cache=True, later
+        # steps typically have sequence length 1, so this targets the current token.
+        if not self._prefill_seen and hidden.shape[1] > 1 and self.prompt_last_indices is not None:
+            batch_size = hidden.shape[0]
+            if len(self.prompt_last_indices) != batch_size:
+                raise ValueError(
+                    f"prompt_last_indices batch mismatch: expected {batch_size}, got {len(self.prompt_last_indices)}"
+                )
+            batch_index = torch.arange(batch_size, device=hidden.device)
+            token_index = torch.tensor(
+                [max(0, min(index, hidden.shape[1] - 1)) for index in self.prompt_last_indices],
+                device=hidden.device,
+                dtype=torch.long,
+            )
+            steered[batch_index, token_index, :] = steered[batch_index, token_index, :] + (
+                self.alpha * direction
+            )
+            self._prefill_seen = True
+            return steered
+
+        steered[:, -1, :] = steered[:, -1, :] + (self.alpha * direction)
+        self._prefill_seen = True
+        return steered
 
     def _hook(self, _module, _inputs, output):
         if isinstance(output, tuple):
             if not output:
                 return output
-            steered_hidden = self._apply_direction(output[0])
+            if self.apply_mode == "all_positions":
+                steered_hidden = self._apply_all_positions(output[0])
+            else:
+                steered_hidden = self._apply_last_prompt_and_current(output[0])
             return (steered_hidden, *output[1:])
-        return self._apply_direction(output)
+        if self.apply_mode == "all_positions":
+            return self._apply_all_positions(output)
+        return self._apply_last_prompt_and_current(output)
 
     def register(self, module):
         self._handle = module.register_forward_hook(self._hook)
@@ -458,6 +511,8 @@ def format_repro_command(args, output_path: str, *, resume: bool) -> str:
         cmd.extend(["--steering_direction_path", shlex.quote(str(args.steering_direction_path))])
     if args.alphas:
         cmd.extend(["--alphas", shlex.quote(str(args.alphas))])
+    if args.steering_apply_mode != "last_prompt_and_current":
+        cmd.extend(["--steering_apply_mode", shlex.quote(str(args.steering_apply_mode))])
     if args.no_save_responses:
         cmd.append("--no_save_responses")
     if args.disable_thinking:
@@ -929,6 +984,7 @@ def save_incremental(
         "system_prompt": args.system_prompt,
         "prompt_suffix": args.prompt_suffix,
         "steering_alpha": steering_alpha,
+        "steering_apply_mode": args.steering_apply_mode,
         "selected_situation_ids": target_situation_ids,
         "selected_subset_type_counts": selected_subset_type_counts,
         "selected_situations": situation_manifest,
@@ -1105,6 +1161,7 @@ def generate_response_transformers(
     steering_block=None,
     steering_direction: Optional[torch.Tensor] = None,
     steering_alpha: float = 0.0,
+    steering_apply_mode: str = "last_prompt_and_current",
 ):
     """Generate one or more responses with the Transformers backend."""
     texts = [
@@ -1118,12 +1175,23 @@ def generate_response_transformers(
     inputs = tokenizer(texts, return_tensors="pt", padding=True).to(get_input_device(model))
     prompt_token_count = inputs["input_ids"].shape[1]
     prompt_lengths = inputs["attention_mask"].sum(dim=1).tolist()
+    prompt_last_indices = (
+        (inputs["attention_mask"].to(torch.long) * torch.arange(prompt_token_count, device=inputs["attention_mask"].device))
+        .max(dim=1)
+        .values
+        .tolist()
+    )
 
     hook = None
     if steering_block is not None and steering_direction is not None and abs(steering_alpha) > 0:
         block_device = next(steering_block.parameters()).device
         direction = steering_direction.to(device=block_device, dtype=model.dtype)
-        hook = ResidualSteeringHook(direction=direction, alpha=steering_alpha).register(steering_block)
+        hook = ResidualSteeringHook(
+            direction=direction,
+            alpha=steering_alpha,
+            apply_mode=steering_apply_mode,
+            prompt_last_indices=prompt_last_indices,
+        ).register(steering_block)
 
     gen_start = time.time()
     try:
@@ -1176,6 +1244,7 @@ def generate_response_transformers(
                     steering_block=steering_block,
                     steering_direction=steering_direction,
                     steering_alpha=steering_alpha,
+                    steering_apply_mode=steering_apply_mode,
                 )
                 responses.extend(sub_responses)
                 generated_token_counts.extend(sub_token_counts)
@@ -1298,6 +1367,7 @@ def generate_response(
     steering_block=None,
     steering_direction: Optional[torch.Tensor] = None,
     steering_alpha: float = 0.0,
+    steering_apply_mode: str = "last_prompt_and_current",
     lora_request=None,
 ):
     """Dispatch generation to the selected inference backend."""
@@ -1328,6 +1398,7 @@ def generate_response(
         steering_block=steering_block,
         steering_direction=steering_direction,
         steering_alpha=steering_alpha,
+        steering_apply_mode=steering_apply_mode,
     )
 
 
@@ -1353,6 +1424,7 @@ def run_single_alpha_eval(
     print(f"Backend: {backend}")
     print(f"Temperature: {args.temperature} ({'deterministic' if args.temperature == 0 else 'sampling'})")
     print(f"Steering alpha: {steering_alpha:+.4f}")
+    print(f"Steering apply mode: {args.steering_apply_mode}")
     print(f"Top-p: {args.top_p}")
     print(f"Top-k: {args.top_k}")
     print(f"Seed: {args.seed}")
@@ -1525,6 +1597,7 @@ def run_single_alpha_eval(
             steering_block=steering_block,
             steering_direction=steering_direction,
             steering_alpha=steering_alpha,
+            steering_apply_mode=args.steering_apply_mode,
             lora_request=lora_request,
         )
         effective_elapsed = batch_elapsed / max(1, len(batch))
@@ -1968,6 +2041,17 @@ def main():
         help="Path to a precomputed steering vector (torch tensor or dict wrapper)",
     )
     parser.add_argument(
+        "--steering_apply_mode",
+        choices=["last_prompt_and_current", "all_positions"],
+        default="last_prompt_and_current",
+        help=(
+            "How to apply the steering vector on the Transformers backend. "
+            "'last_prompt_and_current' steers only the last real prompt token on prefill "
+            "and the current token on decode steps; 'all_positions' preserves the legacy "
+            "behavior of steering every position in each forward pass."
+        ),
+    )
+    parser.add_argument(
         "--save_steering_direction",
         type=str,
         default=None,
@@ -2214,6 +2298,7 @@ def main():
             "mode": "precomputed_vector",
             "vector_path": args.steering_direction_path,
             "eval_layer": eval_layer,
+            "apply_mode": args.steering_apply_mode,
             "direction_norm": float(steering_direction.norm(p=2).item()),
         }
 
@@ -2256,6 +2341,7 @@ def main():
             "icv_pairs_jsonl": args.icv_pairs_jsonl,
             "icv_layer": icv_layer,
             "eval_layer": eval_layer,
+            "apply_mode": args.steering_apply_mode,
             "icv_method": args.icv_method,
             "num_icv_probes": args.num_icv_probes,
             "num_icv_demos": args.num_icv_demos,
@@ -2333,6 +2419,7 @@ def main():
                     "system_prompt": args.system_prompt,
                     "prompt_suffix": args.prompt_suffix,
                     "enable_thinking": not args.disable_thinking,
+                    "steering_apply_mode": args.steering_apply_mode,
                     "alphas": alphas,
                     "resume": args.resume,
                     "save_every": args.save_every,

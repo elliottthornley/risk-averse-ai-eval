@@ -4,6 +4,7 @@ They are not the current default datasets for `evaluate.py`.
 
 Current defaults live in the parent `data/` directory:
 
+- `2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv`
 - `2026_03_22_medium_stakes_val_set_500_Rebels.csv`
 - `2026_03_22_medium_stakes_val_set_500_steals.csv`
 - `2026_03_22_high_stakes_test_set_1000_Rebels.csv`

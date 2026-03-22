@@ -10,9 +10,7 @@ Creative Commons Attribution 4.0 International License (CC BY 4.0).
 
 This license applies to data files in the [`data/`](data/) directory, including:
 
-- `2026_01_29_low_stakes_training_set_gambles.csv`
-- `2026_01_29_low_stakes_validation_set_gambles.csv`
-- `2026_01_29_new_full_training_set_with_CoTs_from_Sonnet_4_5.csv`
+- `2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv`
 - `2026_03_22_medium_stakes_val_set_500_Rebels.csv`
 - `2026_03_22_medium_stakes_val_set_500_steals.csv`
 - `2026_03_22_high_stakes_test_set_1000_Rebels.csv`

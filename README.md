@@ -15,6 +15,12 @@ Separate steals-only evals are available through:
 
 The older March 13 combined files remain available through explicit `*_combined_rebels_and_steals` dataset aliases and now live under `data/legacy_nondefault/`.
 
+For low-stakes data, the repo now ships a single March 22 source CSV with `1000` situations and CoTs.
+
+- `low_stakes_training` points to that full source CSV
+- `low_stakes_validation` also points to that same source CSV
+- if you want a held-out in-distribution validation set, choose a fixed slice with `--start_position` / `--end_position` or make a separate CSV and pass `--custom_csv`
+
 ## What This Evaluator Is For
 
 The main use case is offline evaluation of a base model or a LoRA-adapted model on fixed gamble-choice situations, with:
@@ -67,6 +73,7 @@ That last default matters:
 - `--stop_after 50` means a default run only evaluates `50` new situations in one invocation.
 - To run a full dataset in one invocation, set `--num_situations` and `--stop_after` to that dataset's max size.
 - Current headline sizes are `500` for `medium_stakes_validation` and `1000` for `high_stakes_test`, `astronomical_stakes_deployment`, and `steals_test`.
+- The shared low-stakes source CSV has `1000` situations.
 
 ## Exact Prompting Setup
 
@@ -368,8 +375,8 @@ These are the main aliases on `main`:
 
 On this branch, those map to:
 
-- `low_stakes_training` -> `data/2026_01_29_low_stakes_training_set_gambles.csv`
-- `low_stakes_validation` -> `data/2026_01_29_low_stakes_validation_set_gambles.csv`
+- `low_stakes_training` -> `data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv`
+- `low_stakes_validation` -> `data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv`
 - `medium_stakes_validation` -> `data/2026_03_22_medium_stakes_val_set_500_Rebels.csv`
 - `high_stakes_test` -> `data/2026_03_22_high_stakes_test_set_1000_Rebels.csv`
 - `astronomical_stakes_deployment` -> `data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv`
@@ -423,9 +430,7 @@ These are still accepted:
 
 The repository currently ships these built-in CSVs:
 
-- `data/2026_01_29_low_stakes_training_set_gambles.csv`
-- `data/2026_01_29_low_stakes_validation_set_gambles.csv`
-- `data/2026_01_29_new_full_training_set_with_CoTs_from_Sonnet_4_5.csv`
+- `data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv`
 - `data/2026_03_22_medium_stakes_val_set_500_Rebels.csv`
 - `data/2026_03_22_medium_stakes_val_set_500_steals.csv`
 - `data/2026_03_22_high_stakes_test_set_1000_Rebels.csv`
@@ -435,6 +440,12 @@ The repository currently ships these built-in CSVs:
 Older nondefault OOD CSVs are still in the repo under:
 
 - `data/legacy_nondefault/`
+
+For the low-stakes source file:
+
+- the file has `1000` situations total
+- it is the current source for both `low_stakes_training` and `low_stakes_validation`
+- `low_stakes_validation` is no longer a separate built-in file; treat it as “the same source CSV, but use your own fixed validation slice”
 
 For the new March 22 rebel-only headline files:
 
@@ -535,8 +546,8 @@ Example:
 python evaluate.py \
   --dataset low_stakes_training \
   --lin_only \
-  --num_situations 500 \
-  --stop_after 500 \
+  --num_situations 1000 \
+  --stop_after 1000 \
   --output low_train_lin_only.json
 ```
 
@@ -546,6 +557,18 @@ There is also a convenience alias:
 - `low_stakes_validation_lin_only`
 
 Those aliases auto-enable `--lin_only`.
+
+Example held-out low-stakes validation slice:
+
+```bash
+python evaluate.py \
+  --dataset low_stakes_validation \
+  --start_position 901 \
+  --end_position 1000 \
+  --num_situations 100 \
+  --stop_after 100 \
+  --output low_val_slice.json
+```
 
 ## Checkpointing, Resume, and Chunked Runs
 

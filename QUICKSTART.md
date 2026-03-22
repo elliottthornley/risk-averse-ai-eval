@@ -61,10 +61,10 @@ Use `--dataset`:
 
 ```bash
 # Low-stakes training
-python evaluate.py --dataset low_stakes_training --num_situations 500 --output low_train.json
+python evaluate.py --dataset low_stakes_training --num_situations 1000 --output low_train.json
 
-# Low-stakes validation
-python evaluate.py --dataset low_stakes_validation --num_situations 50 --output low_val.json
+# Low-stakes validation slice from the same March 22 source CSV
+python evaluate.py --dataset low_stakes_validation --start_position 901 --end_position 1000 --num_situations 100 --output low_val.json
 
 # Medium-stakes validation (default)
 python evaluate.py --dataset medium_stakes_validation --num_situations 500 --output med_val.json
@@ -84,6 +84,8 @@ python evaluate.py --dataset steals_test --num_situations 1000 --output steals_t
 # Combined high-stakes run on the older March 13 file
 python evaluate.py --dataset high_stakes_test_combined_rebels_and_steals --num_situations 1200 --output high_test_combined.json
 ```
+
+`low_stakes_validation` is no longer a separate built-in CSV. It points to the same March 22 low-stakes source file as `low_stakes_training`, so use a fixed slice or your own custom split.
 
 Show all built-in aliases:
 ```bash
@@ -125,19 +127,21 @@ Keep these fixed across chunks:
 python evaluate.py \
   --dataset low_stakes_training \
   --lin_only \
-  --num_situations 500 \
+  --num_situations 1000 \
   --output low_train_lin_only.json
 
 # Equivalent alias
 python evaluate.py \
   --dataset low_stakes_training_lin_only \
-  --num_situations 500 \
+  --num_situations 1000 \
   --output low_train_lin_only_alias.json
 
-# Same idea on the in-distribution validation set
+# Same idea on a held-out in-distribution validation slice
 python evaluate.py \
   --dataset low_stakes_validation_lin_only \
-  --num_situations 50 \
+  --start_position 901 \
+  --end_position 1000 \
+  --num_situations 100 \
   --output low_val_lin_only_alias.json
 ```
 

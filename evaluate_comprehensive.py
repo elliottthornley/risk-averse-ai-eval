@@ -26,8 +26,8 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # === DATASETS ===
 DATASETS = {
-    "low_stakes_training": "data/2026_01_29_low_stakes_training_set_gambles.csv",
-    "low_stakes_validation": "data/2026_01_29_low_stakes_validation_set_gambles.csv",
+    "low_stakes_training": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
+    "low_stakes_validation": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
     "medium_stakes_validation": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
     "high_stakes_test": "data/2026_03_22_high_stakes_test_set_1000_Rebels.csv",
     "astronomical_stakes_deployment": "data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv",

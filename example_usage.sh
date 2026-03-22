@@ -54,13 +54,15 @@ echo ""
 echo "Results saved to: results_ood_validation.json"
 echo ""
 
-# Example 4: In-Distribution Validation
-echo "4. Evaluating on in-distribution validation set..."
+# Example 4: In-Distribution Validation Slice
+echo "4. Evaluating on an in-distribution validation slice..."
 python evaluate.py \
     --model_path "$MODEL_PATH" \
     --base_model "$BASE_MODEL" \
     --dataset indist_validation \
-    --num_situations 50 \
+    --start_position 901 \
+    --end_position 1000 \
+    --num_situations 100 \
     --temperature 0 \
     --output results_indist_val.json
 

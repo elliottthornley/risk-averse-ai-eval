@@ -134,15 +134,15 @@ gc.collect()
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CANONICAL_DATASET_ALIASES = {
-    "low_stakes_training": "data/2026_01_29_low_stakes_training_set_gambles.csv",
-    "low_stakes_validation": "data/2026_01_29_low_stakes_validation_set_gambles.csv",
+    "low_stakes_training": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
+    "low_stakes_validation": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
     "medium_stakes_validation": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
     "high_stakes_test": "data/2026_03_22_high_stakes_test_set_1000_Rebels.csv",
     "astronomical_stakes_deployment": "data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv",
 }
 EXTRA_DATASET_ALIASES = {
-    "low_stakes_training_lin_only": "data/2026_01_29_low_stakes_training_set_gambles.csv",
-    "low_stakes_validation_lin_only": "data/2026_01_29_low_stakes_validation_set_gambles.csv",
+    "low_stakes_training_lin_only": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
+    "low_stakes_validation_lin_only": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
     "medium_stakes_validation_rebel_cooperate": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
     "medium_stakes_validation_steals_only": "data/2026_03_22_medium_stakes_val_set_500_steals.csv",
     "medium_stakes_validation_unified": "data/legacy_nondefault/2026-03-13_medium_stakes_validation_set_gambles.csv",
@@ -2157,6 +2157,12 @@ def main():
         print(
             "Note: --lin_only is intended for the low-stakes training/validation datasets. "
             f"You are using it with '{args.dataset}'."
+        )
+
+    if args.dataset in {"low_stakes_validation", "low_stakes_validation_lin_only", "indist_validation"}:
+        print(
+            "Note: low_stakes_validation now points to the same March 22 source CSV as low_stakes_training. "
+            "Use --start_position/--end_position or --custom_csv if you want a fixed held-out validation split."
         )
 
     if not os.path.exists(args.csv_path):

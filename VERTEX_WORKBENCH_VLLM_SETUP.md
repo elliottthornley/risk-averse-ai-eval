@@ -1,72 +1,35 @@
 # Vertex AI Workbench + vLLM Setup Guide
 
-This guide is the recommended way to run this repo on Google Cloud Vertex AI with a GPU.
+This is the recommended Google Cloud path for standard runs of [evaluate.py](/Users/elliottthornley/risk-averse-ai-eval/evaluate.py).
 
-It uses **Vertex AI Workbench** because that is the closest Google Cloud equivalent to the Lambda workflow in this repo:
+It assumes you are using a Vertex AI Workbench instance with a GPU and running the repo directly from a terminal there.
 
-- you get a GPU machine
-- you get a terminal
-- you can run `evaluate.py` directly
-- you can save checkpoint JSONs and resume later
-
-Official Google docs used for this setup:
+Official references:
 
 - [Create a Vertex AI Workbench instance](https://cloud.google.com/vertex-ai/docs/workbench/instances/create)
-- [Quickstart: create a Vertex AI Workbench instance in the console](https://cloud.google.com/vertex-ai/docs/workbench/instances/create-console-quickstart)
-- [GPU locations on Google Cloud](https://cloud.google.com/compute/docs/gpus/gpu-regions-zones)
+- [Create a Workbench instance in the console](https://cloud.google.com/vertex-ai/docs/workbench/instances/create-console-quickstart)
+- [GPU regions and zones on Google Cloud](https://cloud.google.com/compute/docs/gpus/gpu-regions-zones)
 
-## Recommended GPU Size
+## Recommended GPU Sizes
 
-For `Qwen/Qwen3-8B`, the practical target is one GPU with at least `24 GB` of VRAM.
+Good choices for `Qwen/Qwen3-8B`:
 
-Good Vertex/GCP choices:
+- `L4`
+- `A100 40GB`
 
-- `1x L4`
-- `1x A100 40 GB`
+Usable but less comfortable:
 
-Fallback if that is all you can get:
+- `T4`
 
-- `1x T4`
+Rough rule:
 
-The simplest practical advice is:
+- `24GB+` is a good target
+- `16GB` can work, but you may need to lower batch size
+- small-memory cards are not the intended path here
 
-- choose `L4` if you want a solid lower-cost option
-- choose `A100 40 GB` if you want more headroom
+## Workbench Setup
 
-## Before You Start
-
-Make sure you have:
-
-- a Google Cloud project with billing enabled
-- the Vertex AI API enabled
-- permission to create Vertex AI Workbench instances
-- a zone where your chosen GPU is available
-
-Google’s GPU availability changes over time, so check the official GPU locations page before picking a zone.
-
-## Recommended Console Setup
-
-In the Google Cloud console:
-
-1. Go to Vertex AI Workbench Instances.
-2. Create a new instance.
-3. Pick a zone where your preferred GPU is available.
-4. Choose a machine with one GPU:
-   - `1x L4` is the default recommendation
-   - `1x A100 40 GB` is also a good choice
-5. In the security settings, enable:
-   - `Terminal access`
-   - `Root access`
-6. Leave JupyterLab on the default modern version.
-7. Create the instance.
-
-Google’s docs note that Vertex AI Workbench automatically starts the instance after creation and then enables an **Open JupyterLab** link.
-
-## Recommended Setup Inside The Instance
-
-Open JupyterLab, then open a terminal.
-
-Run:
+Inside the Workbench terminal:
 
 ```bash
 git clone https://github.com/elliottthornley/risk-averse-ai-eval.git
@@ -86,13 +49,7 @@ pip install \
   "vllm==0.17.1"
 ```
 
-Use a normal clean virtual environment.
-
-Do not mix these instructions with unrelated package installs unless you actually need them.
-
-## First Smoke Test
-
-Before a large run, do a small one:
+## Smoke Test
 
 ```bash
 python evaluate.py \
@@ -105,28 +62,24 @@ python evaluate.py \
   --output smoke_vllm.json
 ```
 
-Success looks like:
+## Recommended Real Runs
 
-- the model loads
-- generation starts
-- results are saved to `smoke_vllm.json`
+### Medium validation
 
-## Standard Real Runs
-
-Headline medium-stakes run:
+Use `200` situations unless you specifically need all `500`.
 
 ```bash
 python evaluate.py \
   --backend vllm \
   --base_model Qwen/Qwen3-8B \
   --dataset medium_stakes_validation \
-  --num_situations 500 \
-  --stop_after 50 \
+  --num_situations 200 \
+  --stop_after 200 \
   --batch_size 4 \
-  --output medium_vllm.json
+  --output medium_validation.json
 ```
 
-Headline high-stakes run:
+### High-stakes test
 
 ```bash
 python evaluate.py \
@@ -136,10 +89,23 @@ python evaluate.py \
   --num_situations 1000 \
   --stop_after 50 \
   --batch_size 4 \
-  --output high_vllm.json
+  --output high_stakes_test.json
 ```
 
-Steals-only run:
+### Astronomical-stakes deployment
+
+```bash
+python evaluate.py \
+  --backend vllm \
+  --base_model Qwen/Qwen3-8B \
+  --dataset astronomical_stakes_deployment \
+  --num_situations 1000 \
+  --stop_after 50 \
+  --batch_size 4 \
+  --output astronomical_stakes_deployment.json
+```
+
+### Steals-only test
 
 ```bash
 python evaluate.py \
@@ -149,25 +115,10 @@ python evaluate.py \
   --num_situations 1000 \
   --stop_after 50 \
   --batch_size 4 \
-  --output steals_vllm.json
+  --output steals_test.json
 ```
 
-Older combined comparison run:
-
-```bash
-python evaluate.py \
-  --backend vllm \
-  --base_model Qwen/Qwen3-8B \
-  --dataset high_stakes_test_combined_rebels_and_steals \
-  --num_situations 1200 \
-  --stop_after 50 \
-  --batch_size 4 \
-  --output high_combined_vllm.json
-```
-
-## Saving and Resuming
-
-The output JSON is also the checkpoint file.
+## Saving and Resume
 
 Defaults:
 
@@ -175,7 +126,9 @@ Defaults:
 - `--backup_every 20`
 - `--stop_after 50`
 
-To resume:
+Always save responses. Do not use `--no_save_responses` unless you have already talked to Elliott about it.
+
+Resume example:
 
 ```bash
 python evaluate.py \
@@ -184,49 +137,42 @@ python evaluate.py \
   --dataset high_stakes_test \
   --num_situations 1000 \
   --stop_after 50 \
-  --batch_size 4 \
   --resume \
-  --output high_vllm.json
+  --output high_stakes_test.json
 ```
 
-Keep these fixed across resume chunks:
+## If You Hit Memory Trouble
 
-- `--dataset`
-- `--num_situations`
-- `--start_position`
-- `--end_position`
-- `--output`
+The first safe thing to try is a smaller `--batch_size`.
 
-## Copying Results To Cloud Storage
-
-If you want a second copy outside the Workbench VM, copy the JSON to a GCS bucket:
-
-```bash
-gcloud storage cp high_vllm.json gs://YOUR_BUCKET/risk-averse-ai-evals/high_vllm.json
-gcloud storage cp high_vllm.json.bak gs://YOUR_BUCKET/risk-averse-ai-evals/high_vllm.json.bak
-```
-
-That is optional, but useful for long runs.
-
-## If vLLM Fails
-
-If `vllm` still fails after a clean install, use `transformers` as the fallback:
+For example:
 
 ```bash
 python evaluate.py \
-  --backend transformers \
+  --backend vllm \
   --base_model Qwen/Qwen3-8B \
   --dataset medium_stakes_validation \
-  --num_situations 8 \
-  --stop_after 8 \
-  --batch_size 4 \
-  --output smoke_transformers.json
+  --num_situations 200 \
+  --stop_after 200 \
+  --batch_size 2 \
+  --output medium_validation.json
 ```
 
-`transformers` is the emergency path, not the preferred one.
+## LIN-Only Reminder
 
-## Shut The Instance Down When You Are Done
+For low-stakes steering-vector or DPO workflows, use `--lin_only`.
 
-When the run is complete, stop or delete the Workbench instance.
+```bash
+python evaluate.py \
+  --backend vllm \
+  --base_model Qwen/Qwen3-8B \
+  --dataset low_stakes_training \
+  --lin_only \
+  --num_situations 1000 \
+  --stop_after 1000 \
+  --output low_stakes_lin_only.json
+```
 
-Otherwise the VM and GPU can keep billing.
+## Legacy Material
+
+Older combined rebels-and-steals datasets remain in [data/legacy_nondefault](/Users/elliottthornley/risk-averse-ai-eval/data/legacy_nondefault), but they are legacy/nondefault and should not be used for new runs.

@@ -135,21 +135,26 @@ gc.collect()
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CANONICAL_DATASET_ALIASES = {
     "low_stakes_training": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
-    "low_stakes_validation": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
     "medium_stakes_validation": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
     "high_stakes_test": "data/2026_03_22_high_stakes_test_set_1000_Rebels.csv",
     "astronomical_stakes_deployment": "data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv",
 }
-EXTRA_DATASET_ALIASES = {
+CURRENT_EXTRA_DATASET_ALIASES = {
+    "low_stakes_validation": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
     "low_stakes_training_lin_only": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
     "low_stakes_validation_lin_only": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
-    "medium_stakes_validation_rebel_cooperate": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
+    "medium_stakes_validation_rebels_only": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
     "medium_stakes_validation_steals_only": "data/2026_03_22_medium_stakes_val_set_500_steals.csv",
+    "high_stakes_test_rebels_only": "data/2026_03_22_high_stakes_test_set_1000_Rebels.csv",
+    "astronomical_stakes_deployment_rebels_only": "data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv",
+    "steals_test": "data/2026_03_22_test_set_1000_Steals.csv",
+}
+LEGACY_NONDEFAULT_DATASET_ALIASES = {
+    "medium_stakes_validation_rebel_cooperate": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
     "medium_stakes_validation_unified": "data/legacy_nondefault/2026-03-13_medium_stakes_validation_set_gambles.csv",
     "medium_stakes_validation_combined_rebels_and_steals": "data/legacy_nondefault/2026-03-13_medium_stakes_validation_set_gambles.csv",
     "high_stakes_test_rebel_cooperate": "data/2026_03_22_high_stakes_test_set_1000_Rebels.csv",
     "astronomical_stakes_deployment_rebel_cooperate": "data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv",
-    "steals_test": "data/2026_03_22_test_set_1000_Steals.csv",
     "high_stakes_test_with_steals": "data/2026_03_22_test_set_1000_Steals.csv",
     "astronomical_stakes_deployment_with_steals": "data/2026_03_22_test_set_1000_Steals.csv",
     "high_stakes_test_combined_rebels_and_steals": "data/legacy_nondefault/2026-03-13_high_stakes_test_set_gambles.csv",
@@ -158,6 +163,10 @@ EXTRA_DATASET_ALIASES = {
     "astronomical_stakes_deployment_combined": "data/legacy_nondefault/2026-03-13_astronomical_stakes_deployment_set_gambles.csv",
     "high_stakes_test_unified": "data/legacy_nondefault/2026-03-13_high_stakes_test_set_gambles.csv",
     "astronomical_stakes_deployment_unified": "data/legacy_nondefault/2026-03-13_astronomical_stakes_deployment_set_gambles.csv",
+}
+EXTRA_DATASET_ALIASES = {
+    **CURRENT_EXTRA_DATASET_ALIASES,
+    **LEGACY_NONDEFAULT_DATASET_ALIASES,
 }
 LEGACY_DATASET_ALIASES = {
     "training": "low_stakes_training",
@@ -171,34 +180,37 @@ DATASET_ALIASES = {
 }
 DATASET_VARIANT_PATHS = {
     "medium_stakes_validation": {
-        "rebel_cooperate": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
-        "steal_mixed": "data/2026_03_22_medium_stakes_val_set_500_steals.csv",
+        "rebels_only": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
+        "steals_only": "data/2026_03_22_medium_stakes_val_set_500_steals.csv",
         "combined": "data/legacy_nondefault/2026-03-13_medium_stakes_validation_set_gambles.csv",
     },
     "high_stakes_test": {
-        "rebel_cooperate": "data/2026_03_22_high_stakes_test_set_1000_Rebels.csv",
-        "steal_mixed": "data/2026_03_22_test_set_1000_Steals.csv",
+        "rebels_only": "data/2026_03_22_high_stakes_test_set_1000_Rebels.csv",
+        "steals_only": "data/2026_03_22_test_set_1000_Steals.csv",
         "combined": "data/legacy_nondefault/2026-03-13_high_stakes_test_set_gambles.csv",
     },
     "astronomical_stakes_deployment": {
-        "rebel_cooperate": "data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv",
-        "steal_mixed": "data/2026_03_22_test_set_1000_Steals.csv",
+        "rebels_only": "data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv",
+        "steals_only": "data/2026_03_22_test_set_1000_Steals.csv",
         "combined": "data/legacy_nondefault/2026-03-13_astronomical_stakes_deployment_set_gambles.csv",
     },
 }
 DATASET_ALIAS_BASE_NAMES = {
     "medium_stakes_validation": "medium_stakes_validation",
+    "medium_stakes_validation_rebels_only": "medium_stakes_validation",
     "medium_stakes_validation_rebel_cooperate": "medium_stakes_validation",
     "medium_stakes_validation_steals_only": "medium_stakes_validation",
     "medium_stakes_validation_combined_rebels_and_steals": "medium_stakes_validation",
     "medium_stakes_validation_unified": "medium_stakes_validation",
     "high_stakes_test": "high_stakes_test",
+    "high_stakes_test_rebels_only": "high_stakes_test",
     "high_stakes_test_rebel_cooperate": "high_stakes_test",
     "high_stakes_test_with_steals": "high_stakes_test",
     "high_stakes_test_combined_rebels_and_steals": "high_stakes_test",
     "high_stakes_test_combined": "high_stakes_test",
     "high_stakes_test_unified": "high_stakes_test",
     "astronomical_stakes_deployment": "astronomical_stakes_deployment",
+    "astronomical_stakes_deployment_rebels_only": "astronomical_stakes_deployment",
     "astronomical_stakes_deployment_rebel_cooperate": "astronomical_stakes_deployment",
     "astronomical_stakes_deployment_with_steals": "astronomical_stakes_deployment",
     "astronomical_stakes_deployment_combined_rebels_and_steals": "astronomical_stakes_deployment",
@@ -207,39 +219,46 @@ DATASET_ALIAS_BASE_NAMES = {
     "steals_test": "steals_test",
 }
 DATASET_ALIAS_VARIANTS = {
-    "medium_stakes_validation": "rebel_cooperate",
-    "medium_stakes_validation_rebel_cooperate": "rebel_cooperate",
-    "medium_stakes_validation_steals_only": "steal_mixed",
+    "medium_stakes_validation": "rebels_only",
+    "medium_stakes_validation_rebels_only": "rebels_only",
+    "medium_stakes_validation_rebel_cooperate": "rebels_only",
+    "medium_stakes_validation_steals_only": "steals_only",
     "medium_stakes_validation_combined_rebels_and_steals": "combined",
     "medium_stakes_validation_unified": "combined",
-    "high_stakes_test": "rebel_cooperate",
-    "high_stakes_test_rebel_cooperate": "rebel_cooperate",
-    "high_stakes_test_with_steals": "steal_mixed",
+    "high_stakes_test": "rebels_only",
+    "high_stakes_test_rebels_only": "rebels_only",
+    "high_stakes_test_rebel_cooperate": "rebels_only",
+    "high_stakes_test_with_steals": "steals_only",
     "high_stakes_test_combined_rebels_and_steals": "combined",
     "high_stakes_test_combined": "combined",
     "high_stakes_test_unified": "combined",
-    "astronomical_stakes_deployment": "rebel_cooperate",
-    "astronomical_stakes_deployment_rebel_cooperate": "rebel_cooperate",
-    "astronomical_stakes_deployment_with_steals": "steal_mixed",
+    "astronomical_stakes_deployment": "rebels_only",
+    "astronomical_stakes_deployment_rebels_only": "rebels_only",
+    "astronomical_stakes_deployment_rebel_cooperate": "rebels_only",
+    "astronomical_stakes_deployment_with_steals": "steals_only",
     "astronomical_stakes_deployment_combined_rebels_and_steals": "combined",
     "astronomical_stakes_deployment_combined": "combined",
     "astronomical_stakes_deployment_unified": "combined",
-    "steals_test": "steal_mixed",
+    "steals_test": "steals_only",
 }
 DATASET_VARIANT_SYNONYMS = {
     "default": "default",
-    "rebel_cooperate": "rebel_cooperate",
-    "with_steals": "steal_mixed",
-    "steals_only": "steal_mixed",
-    "steal_only": "steal_mixed",
-    "steal_mixed": "steal_mixed",
+    "rebels_only": "rebels_only",
+    "rebels": "rebels_only",
+    "rebel_cooperate": "rebels_only",
+    "rebel": "rebels_only",
+    "with_steals": "steals_only",
+    "steals_only": "steals_only",
+    "steals": "steals_only",
+    "steal_only": "steals_only",
+    "steal_mixed": "steals_only",
     "combined": "combined",
     "unified": "combined",
 }
 REQUIRED_COLUMNS = {"situation_id", "prompt_text", "option_index", "option_type"}
 CARA_COLUMNS = {"is_best_cara_display", "CARA_correct_labels", "CARA_alpha_0_01_best_labels"}
 LIN_ONLY_BUCKET_LABELS = {"lin_only", "linear_only"}
-SUBSET_TYPES = ("rebel_cooperate", "steal_mixed")
+SUBSET_TYPES = ("rebels_only", "steals_only")
 
 
 def resolve_path(path):
@@ -412,12 +431,14 @@ def probability_format_from_value(use_verbal_probs_value, prompt_text=None):
 def infer_subset_type(raw_subset_type, option_types_besides_cooperate: List[str]) -> str:
     """Normalize subset labels, inferring them from option types if needed."""
     if raw_subset_type is not None and not (isinstance(raw_subset_type, float) and pd.isna(raw_subset_type)):
-        subset_type = str(raw_subset_type).strip().lower()
-        if subset_type in SUBSET_TYPES:
-            return subset_type
+        subset_type = str(raw_subset_type).strip().lower().replace("-", "_")
+        if subset_type in {"rebels_only", "rebel_cooperate"}:
+            return "rebels_only"
+        if subset_type in {"steals_only", "steal_mixed", "with_steals"}:
+            return "steals_only"
     if "steal" in option_types_besides_cooperate:
-        return "steal_mixed"
-    return "rebel_cooperate"
+        return "steals_only"
+    return "rebels_only"
 
 
 def extract_situation_manifest_entry(situation: Dict) -> Dict:
@@ -452,6 +473,9 @@ def annotate_rows_with_situation_metadata(rows: List[Dict], situation_index: Dic
         if not manifest:
             continue
         for key, value in manifest.items():
+            if key in {"subset_type", "option_types_besides_cooperate"}:
+                row[key] = value
+                continue
             if row.get(key) is None:
                 row[key] = value
 
@@ -762,7 +786,7 @@ def summarize_result_payload(results: List[Dict]) -> Dict:
 
 
 def summarize_results_by_subset_type(results: List[Dict], situation_manifest: List[Dict]) -> Dict:
-    """Compute the same metric bundle for rebel_cooperate and steal_mixed subsets."""
+    """Compute the same metric bundle for rebels_only and steals_only subsets."""
     target_ids_by_subset_type = {subset_type: [] for subset_type in SUBSET_TYPES}
     for entry in situation_manifest:
         subset_type = entry.get("subset_type")
@@ -780,7 +804,7 @@ def summarize_results_by_subset_type(results: List[Dict], situation_manifest: Li
 
 
 def summarize_progress_by_subset_type(results: List[Dict], situation_manifest: List[Dict]) -> Dict:
-    """Track completion progress separately for rebel_cooperate and steal_mixed slices."""
+    """Track completion progress separately for rebels_only and steals_only slices."""
     completed_ids = {row.get("situation_id") for row in results if row.get("situation_id") is not None}
     progress = {}
     for subset_type in SUBSET_TYPES:
@@ -1459,7 +1483,12 @@ def run_single_alpha_eval(
             f"prefix_cache={'ON' if args.vllm_enable_prefix_caching else 'default'}"
         )
         print("Note: vLLM backend does not enforce --max_time_per_generation per batch.")
-    print(f"Saving CoT responses: {'NO (--no_save_responses)' if args.no_save_responses else 'YES (default)'}")
+    if args.no_save_responses:
+        print(
+            "Saving responses: NO (--no_save_responses, strongly discouraged; reconsider and talk to Elliott first)"
+        )
+    else:
+        print("Saving responses: YES (default and strongly recommended)")
     print(f"Checkpoint frequency: every {args.save_every} situation(s)")
     if args.backup_every > 0:
         print(f"Backup frequency: every {args.backup_every} situation(s) -> {output_path}.bak")
@@ -1871,9 +1900,9 @@ def main():
         default="default",
         choices=sorted(DATASET_VARIANT_SYNONYMS.keys()),
         help=(
-            "Optional built-in variant override for datasets that have separate rebel_cooperate / with_steals / "
-            "combined CSV files. Prefer explicit dataset aliases like steals_test or "
-            "high_stakes_test_combined_rebels_and_steals when possible (default: default)."
+            "Optional built-in variant override for datasets that have separate rebels_only / steals_only / "
+            "combined CSV files. Prefer explicit dataset aliases like steals_test. "
+            "The combined variant is legacy/nondefault and should only be used for reproduction."
         ),
     )
     parser.add_argument(
@@ -1890,7 +1919,10 @@ def main():
     parser.add_argument(
         "--no_save_responses",
         action="store_true",
-        help="Do NOT save full responses (by default, all CoT responses are saved)",
+        help=(
+            "Do NOT save full responses. Strongly discouraged: collaborators should normally save responses, "
+            "and if you think you need this flag you should reconsider and talk to Elliott first."
+        ),
     )
     parser.add_argument(
         "--max_new_tokens",
@@ -2100,16 +2132,19 @@ def main():
     args = parser.parse_args()
 
     if args.list_datasets:
-        print("Built-in datasets (canonical):")
+        print("Built-in datasets (recommended current defaults):")
         for name, rel_path in CANONICAL_DATASET_ALIASES.items():
             print(f"  {name:32} -> {resolve_path(rel_path)}")
-        print("\nAdditional aliases:")
-        for name, rel_path in EXTRA_DATASET_ALIASES.items():
+        print("\nAdditional current aliases:")
+        for name, rel_path in CURRENT_EXTRA_DATASET_ALIASES.items():
             print(f"  {name:32} -> {resolve_path(rel_path)}")
-        print("\nVariant overrides (for canonical high/astronomical datasets):")
+        print("\nVariant overrides (use sparingly; combined is legacy/nondefault):")
         for dataset_name, variant_paths in DATASET_VARIANT_PATHS.items():
             variants = ", ".join(f"{variant} -> {resolve_path(path)}" for variant, path in variant_paths.items())
             print(f"  {dataset_name:32} :: {variants}")
+        print("\nLegacy/nondefault aliases (not recommended for new runs):")
+        for name, rel_path in LEGACY_NONDEFAULT_DATASET_ALIASES.items():
+            print(f"  {name:32} -> {resolve_path(rel_path)}")
         print("\nLegacy aliases (backward compatibility):")
         for legacy_name, canonical_name in LEGACY_DATASET_ALIASES.items():
             print(f"  {legacy_name:32} -> {canonical_name}")
@@ -2130,6 +2165,12 @@ def main():
         if not args.lin_only:
             print(f"Note: Enabling --lin_only because dataset alias {args.dataset} was selected.")
         args.lin_only = True
+
+    if args.no_save_responses:
+        print(
+            "WARNING: --no_save_responses is strongly discouraged. Collaborators should normally save responses; "
+            "if you think you need this flag, reconsider and talk to Elliott first."
+        )
 
     if args.custom_csv:
         if args.dataset != "medium_stakes_validation":
@@ -2163,6 +2204,12 @@ def main():
         print(
             "Note: low_stakes_validation now points to the same March 22 source CSV as low_stakes_training. "
             "Use --start_position/--end_position or --custom_csv if you want a fixed held-out validation split."
+        )
+
+    if args.resolved_dataset_variant == "combined" or args.dataset in LEGACY_NONDEFAULT_DATASET_ALIASES:
+        print(
+            "WARNING: You are using a legacy/nondefault dataset path. This is mainly for reproduction of older "
+            "combined-runs work, not for the current recommended evaluation setup."
         )
 
     if not os.path.exists(args.csv_path):

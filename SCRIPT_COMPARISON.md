@@ -1,382 +1,86 @@
-# Evaluation Script Comparison
+# Script Comparison
 
-This document explains the differences between the two evaluation scripts and when to use each one.
+This repo now has two current scripts and one deprecated legacy script.
 
-## Quick Summary
+## Current Scripts
 
-| Script | Use Case | Parse Rate | Flexibility | Complexity |
-|--------|----------|------------|-------------|------------|
-| **evaluate.py** ⭐ | **Standard evaluation** | **~96%** | High | Low |
-| evaluate_comprehensive.py | Research comparison | Varies | Low | High |
+| Script | Use it for | Recommended? |
+|---|---|---|
+| [evaluate.py](/Users/elliottthornley/risk-averse-ai-eval/evaluate.py) | Generative gamble-choice evals, including steering runs | Yes |
+| [evaluate_reward_model.py](/Users/elliottthornley/risk-averse-ai-eval/evaluate_reward_model.py) | Reward-model pairwise preference evals | Yes |
 
-**Recommendation: Use `evaluate.py` for almost everything.**
+## Deprecated Script
 
----
+| Script | Status |
+|---|---|
+| [legacy_nondefault/evaluate_comprehensive.py](/Users/elliottthornley/risk-averse-ai-eval/legacy_nondefault/evaluate_comprehensive.py) | Deprecated, legacy/nondefault, do not use for new work |
 
-## 1. `evaluate.py` ⭐ RECOMMENDED
+## `evaluate.py`
 
-### What It Does
-Single evaluation run with **highly permissive answer parsing** to maximize parse rate.
+Use this for:
 
-### Key Features
-- ✅ **96% parse rate** (best in class)
-- ✅ Accepts both **letter** (a,b,c) and **number** (1,2,3) answers
-- ✅ **Configurable via command line** - no code editing needed
-- ✅ **Configurable temperature** (0, 0.7, 1.0, etc.)
-- ✅ Generous token limit (4096) to avoid truncation
-- ✅ Saves full responses for debugging
-- ✅ Handles multiple answer formats:
-  - JSON: `{"answer": "a"}`
-  - Natural: "I choose b"
-  - Parenthesized: "(a)"
-  - Standalone: just "a" at the end
+- normal model evals
+- LoRA evals
+- base-model evals
+- activation steering / ICV runs with `--backend transformers`
 
-### When to Use
-- ✅ **Default evaluation** for your fine-tuned models
-- ✅ When you want **reliable, reproducible results**
-- ✅ When you need to **compare models** fairly
-- ✅ When you want to **experiment with temperature**
-- ✅ For **production/deployment evaluation**
+Important current guidance:
 
-### Usage
-```bash
-# Basic usage (deterministic)
-python evaluate.py \
-    --model_path ./my-model/final \
-    --base_model Qwen/Qwen3-8B \
-    --dataset ood_validation \
-    --temperature 0 \
-    --output results.json
+- use `vllm` by default unless you need steering
+- use `medium_stakes_validation` with `200` situations for the normal validation check
+- save responses
+- use `--lin_only` for low-stakes steering-vector and DPO workflows
 
-# With sampling
-python evaluate.py \
-    --model_path ./my-model/final \
-    --base_model Qwen/Qwen3-8B \
-    --dataset high_stakes_test \
-    --temperature 0.7 \
-    --num_situations 50 \
-    --output results_temp07.json
-
-# Quick eval (25 situations, ~10 mins)
-python evaluate.py \
-    --model_path ./my-model/final \
-    --base_model Qwen/Qwen3-8B \
-    --dataset astronomical_stakes_deployment \
-    --num_situations 25 \
-    --temperature 0 \
-    --output quick_results.json
-```
-
-### Command-Line Configuration
-**What this means:** All settings can be controlled via `--flags` on the command line. You never need to edit the Python code.
-
-**Available flags:**
-- `--model_path`: Path to your model adapter
-- `--base_model`: Base model ID (e.g., Qwen/Qwen3-8B)
-- `--dataset`: Built-in dataset alias
-- `--val_csv`: Custom dataset CSV file (overrides `--dataset`)
-- `--list_datasets`: Print built-in datasets and exit
-- `--num_situations`: Number of situations (default: 50)
-- `--temperature`: Sampling temperature (default: 0)
-- `--max_new_tokens`: Token limit (default: 4096)
-- `--no_save_responses`: Disable saving full CoT responses (saved by default)
-- `--output`: Output JSON file path
-
-**Contrast with comprehensive script:** `evaluate_comprehensive.py` has NO command-line flags. You must edit the Python code to change which models to evaluate, which datasets to use, etc.
-
-### Output Format
-```json
-{
-  "evaluation_config": {
-    "temperature": 0,
-    "max_new_tokens": 4096,
-    "num_situations": 50,
-    "base_model": "Qwen/Qwen3-8B",
-    "model_path": "./my-model/final"
-  },
-  "metrics": {
-    "parse_rate": 0.96,
-    "cooperate_rate": 0.83,
-    "rebel_rate": 0.12,
-    "steal_rate": 0.05,
-    "best_cara_rate": 0.79
-  },
-  "num_valid": 48,
-  "num_total": 50,
-  "results": [...],
-  "failed_responses": [...]
-}
-```
-
-### Pros
-- Highest parse rate
-- Most flexible (all settings via CLI)
-- Best documentation
-- Production-ready
-- Easy to use
-- No code editing required
-
-### Cons
-- Only evaluates one temperature at a time (but fast to run multiple times)
-
----
-
-## 2. `evaluate_comprehensive.py` - Multi-Metric Evaluation
-
-### What It Does
-Comprehensive evaluation running **THREE different evaluation modes** on each model automatically:
-1. **Generation @ temp=0** (deterministic)
-2. **Generation @ secondary temp** (default: 0, configurable in code)
-3. **Log probabilities** (answer-only, no chain-of-thought)
-
-### Key Features
-- Runs two generation passes with configurable temperatures (both default to 0)
-- Tests both CoT generation and direct answer probabilities
-- Compares base models vs fine-tuned models
-- Batch evaluation of multiple models
-
-### When to Use
-- ✅ **Research purposes** when you need comprehensive metrics
-- ✅ Comparing **how temperature affects performance**
-- ✅ Understanding **log probability distributions** vs generation
-- ✅ When you have **time and compute** for thorough analysis
-- ❌ **NOT for quick evaluations** (3x slower than single-metric)
-
-### Configuration (Requires Code Editing)
-**Important:** This script has NO command-line arguments. You must edit the Python file to configure:
-
-```python
-# Edit these in evaluate_comprehensive.py:
-
-DATASETS = {
-    "ood_validation": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
-    "indist_validation": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
-    "training": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
-    "high_stakes_test": "data/2026_03_22_high_stakes_test_set_1000_Rebels.csv",
-    "astronomical_stakes_deployment": "data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv",
-}
-
-BASE_MODELS = [
-    "Qwen/Qwen2.5-7B-Instruct",
-    "Qwen/Qwen3-8B",
-    "Qwen/Qwen3-32B",
-]
-
-FINETUNED_MODELS = {
-    "my_model": {
-        "base_model": "Qwen/Qwen3-8B",
-        "sweep_dir": "path/to/my/sweep/directory",
-        "configs": ["config1", "config2", "config3"]
-    }
-}
-```
-
-### Usage
-```bash
-# Edit the script first to configure your models
-python evaluate_comprehensive.py
-```
-
-### Output Format
-```json
-{
-  "timestamp": "2026-01-15T10:30:00",
-  "num_situations": 50,
-  "temperature_settings": {
-    "generation_primary": 0.0,
-    "generation_secondary": 0.0
-  },
-  "metrics": ["generation_primary", "generation_secondary", "logprob_answer_only"],
-  "base_models": {
-    "Qwen/Qwen3-8B": {
-      "ood_validation": {
-        "generation_primary": {"cara_rate": 0.35, "parse_rate": 0.92},
-        "generation_secondary": {"cara_rate": 0.34, "parse_rate": 0.88},
-        "logprob_answer_only": {"cara_rate": 0.38, "parse_rate": 1.0}
-      }
-    }
-  },
-  "finetuned_models": {...}
-}
-```
-
-### Pros
-- Comprehensive comparison across multiple evaluation methods
-- Good for research papers/reports
-- Automatically evaluates multiple models and datasets
-- Log probability method is useful for base model comparison
-
-### Cons
-- 3x slower (runs 3 evaluations per model)
-- More complex to configure (requires editing script)
-- No command-line flexibility
-- Overkill for most use cases
-
----
-
-## Comparison Table: Detailed
-
-| Feature | evaluate.py | evaluate_comprehensive.py |
-|---------|-------------|--------------------------|
-| **Parse rate** | **~96%** | Varies (~70-95%) |
-| **Temperature control** | ✅ CLI arg (any value) | ❌ Fixed in code (defaults: 0, 0) |
-| **Command-line config** | ✅ Full (all settings) | ❌ None (edit code) |
-| **Accepts numbers (1,2,3)** | ✅ Yes | ✅ Yes |
-| **Accepts letters (a,b,c)** | ✅ Yes | ✅ Yes |
-| **Multiple answer formats** | ✅ 9+ patterns | ✅ 9+ patterns |
-| **Save responses** | ✅ Always (opt-out with --no_save_responses) | ❌ No |
-| **Token limit** | ✅ 4096 (configurable) | ✅ 4096 (fixed) |
-| **Multiple metrics** | ❌ Single run | ✅ 3 methods |
-| **Log probabilities** | ❌ No | ✅ Yes |
-| **Ease of use** | ✅✅✅ Excellent | ❌ Poor (edit code) |
-| **Speed** | ✅ Fast | ❌ 3x slower |
-| **Recommended?** | ✅✅✅ YES | ⚠️ Research only |
-
----
-
-## Which Script Should You Use?
-
-### For 95% of Use Cases: `evaluate.py` ⭐
-
-Use this if you want to:
-- Evaluate your fine-tuned model
-- Compare different models
-- Test at different temperatures
-- Get reliable, reproducible results
-- Have flexibility and control
-- **Configure everything from the command line**
+Example:
 
 ```bash
 python evaluate.py \
-    --model_path <YOUR_MODEL> \
-    --base_model Qwen/Qwen3-8B \
-    --dataset ood_validation \
-    --temperature 0 \
-    --output results.json
+  --dataset medium_stakes_validation \
+  --num_situations 200 \
+  --stop_after 200 \
+  --output medium_validation.json
 ```
 
-### For Research Papers: `evaluate_comprehensive.py`
-
-Use this if you need:
-- Comprehensive comparison across multiple evaluation methods
-- Temperature sensitivity analysis (set the secondary temperature in the script)
-- Log probability analysis
-- Multiple models evaluated in batch
-
-**Trade-off:** 3x longer runtime, requires editing code to configure
-
----
-
-## Understanding "CLI Configuration"
-
-**CLI = Command-Line Interface**
-
-### With CLI Configuration (`evaluate.py`)
-You control everything via flags when running the command:
+Steering example:
 
 ```bash
-python evaluate.py --temperature 0 --model_path ./model1 --output results1.json
-python evaluate.py --temperature 0.7 --model_path ./model2 --output results2.json
-python evaluate.py --temperature 1.0 --model_path ./model3 --output results3.json
-```
-
-**No code editing needed.** Just change the flags.
-
-### Without CLI Configuration (`evaluate_comprehensive.py`)
-You must edit the Python file itself:
-
-```python
-# Open evaluate_comprehensive.py in a text editor
-# Find lines 33-57 and edit:
-BASE_MODELS = ["Qwen/Qwen3-8B"]  # Change this
-FINETUNED_MODELS = {...}  # Change this
-```
-
-Then run:
-```bash
-python evaluate_comprehensive.py  # No flags available
-```
-
-**CLI configuration is much more user-friendly** for most use cases.
-
----
-
-## Temperature Recommendations
-
-Regardless of which script you use, here's when to use different temperatures:
-
-| Temperature | Use Case | Characteristics |
-|-------------|----------|-----------------|
-| **0** | Default evaluation, benchmarking | Deterministic, reproducible, greedy decoding |
-| **0.7** | Optional robustness check | Balanced, realistic sampling |
-| **1.0** | Robustness testing | High diversity, tests edge cases |
-
-**Recommended approach:**
-1. Start with **temp=0** for reproducible benchmarks
-2. Try **temp=0.7** to see realistic sampling behavior
-3. Use **temp=1.0** to test robustness
-
----
-
-## Example Workflows
-
-### Workflow 1: Quick Model Evaluation
-```bash
-# Run on 25 situations, temperature=0
 python evaluate.py \
-    --model_path ./my-model/final \
-    --base_model Qwen/Qwen3-8B \
-    --dataset ood_validation \
-    --num_situations 25 \
-    --temperature 0 \
-    --output quick_eval.json
-
-# Check CARA rate
-cat quick_eval.json | python -c "import json, sys; print(f\"CARA: {json.load(sys.stdin)['metrics']['best_cara_rate']*100:.1f}%\")"
+  --backend transformers \
+  --dataset medium_stakes_validation \
+  --num_situations 200 \
+  --stop_after 200 \
+  --icv_pairs_jsonl data/dpo_lin_only_20260129_clarified.jsonl \
+  --icv_layer 12 \
+  --eval_layer 12 \
+  --alphas "0.0,0.5,1.0" \
+  --output steering_sweep.json
 ```
 
-### Workflow 2: Full Temperature Comparison
+## `evaluate_reward_model.py`
+
+Use this for scalar reward models that score a prompt plus response transcript.
+
+Headline metric:
+
+- `pairwise_accuracy`
+
+Example:
+
 ```bash
-# Evaluate at three temperatures
-for temp in 0 0.7 1.0; do
-    python evaluate.py \
-        --model_path ./my-model/final \
-        --base_model Qwen/Qwen3-8B \
-        --dataset high_stakes_test \
-        --temperature $temp \
-        --output results_temp${temp}.json
-done
-
-# Compare results
-for temp in 0 0.7 1.0; do
-    echo "Temperature $temp:"
-    cat results_temp${temp}.json | python -c "import json, sys; data=json.load(sys.stdin); print(f\"  CARA: {data['metrics']['best_cara_rate']*100:.1f}%, Parse: {data['metrics']['parse_rate']*100:.1f}%\")"
-done
+python evaluate_reward_model.py \
+  --base_model /path/to/reward-model \
+  --dataset reward_model_validation \
+  --num_pairs 200 \
+  --stop_after 200 \
+  --batch_size 16 \
+  --output reward_model_eval.json
 ```
 
-### Workflow 3: Multi-Dataset Evaluation
-```bash
-# Evaluate on all five built-in datasets
-for dataset in ood_validation high_stakes_test astronomical_stakes_deployment indist_validation training; do
-    python evaluate.py \
-        --model_path ./my-model/final \
-        --base_model Qwen/Qwen3-8B \
-        --dataset ${dataset} \
-        --temperature 0 \
-        --output results_${dataset}.json
-done
-```
+## Legacy Material
 
----
+Older combined rebels-and-steals datasets and the deprecated comprehensive script remain in the repo only for reproduction:
 
-## Summary
+- [data/legacy_nondefault](/Users/elliottthornley/risk-averse-ai-eval/data/legacy_nondefault)
+- [legacy_nondefault](/Users/elliottthornley/risk-averse-ai-eval/legacy_nondefault)
 
-**Use `evaluate.py` for almost everything.** It has:
-- Best parse rate (96%)
-- Most flexibility (all settings via command line)
-- Easiest to use
-- Best documentation
-- Production-ready
-- No code editing needed
-
-Only use `evaluate_comprehensive.py` if you specifically need multi-metric research comparison and have the compute budget (3x slower) and don't mind editing Python code to configure it.
+If you are not intentionally reproducing an older result, ignore them.

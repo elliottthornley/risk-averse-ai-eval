@@ -6,9 +6,13 @@ Comprehensive evaluation with multiple metrics:
 3. Answer-only log probabilities (for base model comparison)
 
 Evaluates all models on all datasets.
+
+Deprecated: retained only for reproduction of older work.
 """
 
 import gc
+import os
+import sys
 import torch
 torch.cuda.empty_cache()
 gc.collect()
@@ -16,13 +20,16 @@ gc.collect()
 import pandas as pd
 import json
 import re
-import os
 from datetime import datetime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
-from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
 
 # === DATASETS ===
 DATASETS = {
@@ -82,6 +89,9 @@ def resolve_path(path):
     script_relative = os.path.abspath(os.path.join(SCRIPT_DIR, expanded))
     if os.path.exists(script_relative):
         return script_relative
+    repo_relative = os.path.abspath(os.path.join(REPO_ROOT, expanded))
+    if os.path.exists(repo_relative):
+        return repo_relative
     return os.path.abspath(expanded)
 
 

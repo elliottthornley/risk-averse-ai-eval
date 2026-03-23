@@ -22,6 +22,15 @@ _ROMAN_TO_INT = {
     "x": 10,
 }
 
+_TRUNCATION_SAFE_STRATEGIES = frozenset(
+    {
+        "json",
+        "boxed",
+        "short_answer_line",
+        "bare_token",
+    }
+)
+
 
 @dataclass(frozen=True)
 class ChoiceParseResult:
@@ -75,6 +84,15 @@ def _extract_valid_matches(pattern: str, text: str, valid: Set[str]) -> List[str
 def _last_valid_match(pattern: str, text: str, valid: Set[str]) -> Optional[str]:
     matches = _extract_valid_matches(pattern, text, valid)
     return matches[-1] if matches else None
+
+
+def _valid_match_records(pattern: str, text: str, valid: Set[str]) -> List[tuple[str, re.Match[str]]]:
+    records = []
+    for m in re.finditer(pattern, text, flags=re.IGNORECASE):
+        token = _normalize_label_token(m.group(1))
+        if token in valid:
+            records.append((token, m))
+    return records
 
 
 def _tail_sentences(text: str, limit: int = 8) -> List[str]:
@@ -131,6 +149,68 @@ def extract_json_answer(response: str) -> Optional[str]:
     return candidate
 
 
+def apply_finish_reason_safeguard(
+    parse_result: ChoiceParseResult,
+    finish_reason: Optional[str],
+) -> ChoiceParseResult:
+    """Drop weak parses when generation was truncated by max length."""
+    if parse_result.choice is None:
+        return parse_result
+    if finish_reason == "length" and parse_result.strategy not in _TRUNCATION_SAFE_STRATEGIES:
+        return ChoiceParseResult(choice=None, strategy=None)
+    return parse_result
+
+
+def _sentence_window(text: str, start: int, end: int) -> tuple[str, int, int]:
+    left = max(
+        text.rfind("\n", 0, start),
+        text.rfind(".", 0, start),
+        text.rfind("!", 0, start),
+        text.rfind("?", 0, start),
+    )
+    right_candidates = [
+        pos
+        for pos in (
+            text.find("\n", end),
+            text.find(".", end),
+            text.find("!", end),
+            text.find("?", end),
+        )
+        if pos != -1
+    ]
+    right = min(right_candidates) if right_candidates else len(text)
+    sentence = text[left + 1 : right].strip()
+    offset = left + 1
+    return sentence, start - offset, end - offset
+
+
+def _is_hedged_or_ambiguous_match(text: str, match: re.Match[str]) -> bool:
+    sentence, local_start, local_end = _sentence_window(text, match.start(), match.end())
+    sentence_lower = sentence.lower()
+    prefix = sentence_lower[: max(local_start, 0)]
+    suffix = sentence_lower[max(local_end, 0) :]
+
+    # Reject speculative or hypothetical statements like
+    # "maybe the answer is option 4" or "if you're risk-averse, you might prefer option 1".
+    if re.search(r"\b(?:maybe|perhaps|alternatively)\b", sentence_lower):
+        return True
+    if re.search(r"\b(?:might|may|could)\b", prefix):
+        return True
+    if re.search(r"\bif\s+you\b", prefix):
+        return True
+    if re.search(r"\bif\s+i(?:'m|\s+am)\s+risk-", prefix):
+        return True
+    if re.search(r"\b(?:someone|somebody)\b", prefix):
+        return True
+    if re.search(r"\brisk-(?:averse|seeking|neutral)\b", sentence_lower):
+        return True
+    if re.search(r"^\s*than\b", suffix):
+        return True
+    if re.search(r"^\s*(?:or|and)\b", suffix):
+        return True
+    return False
+
+
 def extract_choice_with_strategy(
     response: str,
     num_options: int,
@@ -161,68 +241,10 @@ def extract_choice_with_strategy(
     if boxed_choice:
         return ChoiceParseResult(choice=boxed_choice, strategy="boxed")
 
-    # 3) Explicit answer markers.
-    answer_choice = _last_valid_match(
-        r'(?:final\s+answer|final|answer|my\s+answer|choice)\s*[:\-]?\s*'
-        r'(?:is\s+)?(?:option\s*)?[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?'
-        r'(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))',
-        tail,
-        valid,
-    )
-    if answer_choice:
-        return ChoiceParseResult(choice=answer_choice, strategy="answer_marker")
-
-    # 4) Decision verbs.
-    decision_choice = _last_valid_match(
-        r"(?:i(?:'d)?\s+)?(?:would\s+)?(?:choose|select|pick|chose|selected|picking|"
-        r"opt\s+for|go\s+with|prefer|recommend|suggest)\s+(?:option\s*)?[\(\[]?\s*"
-        r"([a-z0-9ivx]+)\s*[\)\]]?(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))",
-        tail,
-        valid,
-    )
-    if decision_choice:
-        return ChoiceParseResult(choice=decision_choice, strategy="decision_verb")
-
-    # 5) Conclusive statement about best/most attractive option.
-    option_is_choice = _last_valid_match(
-        r'\boption\s*[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\s+'
-        r'(?:is|seems|looks|appears|has)\s+(?:the\s+)?'
-        r'(?:best|better|preferred|preferable|optimal|most\s+attractive|'
-        r'highest\s+expected\s+(?:utility|value))\b',
-        tail,
-        valid,
-    )
-    if option_is_choice:
-        return ChoiceParseResult(choice=option_is_choice, strategy="option_is_best")
-
-    # 6) Conclusive last-sentence forms often emitted inside thinking-only blocks.
-    tail_sentences = _tail_sentences(tail)
-
-    best_choice_patterns = [
-        (
-            r'(?:therefore|thus|so|hence|overall|ultimately)?\s*,?\s*(?:the\s+)?'
-            r'(?:best|preferred|correct|right|optimal|most\s+attractive)\s+'
-            r'(?:option|choice|answer)\s*(?:is|would\s+be|seems\s+to\s+be)\s*'
-            r'(?:option\s*)?[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?',
-            "best_choice_is",
-        ),
-        (
-            r'(?:therefore|thus|so|hence|overall|ultimately)?\s*,?\s*'
-            r'(?:i\s+)?(?:should|would|will|must|ought\s+to)\s+'
-            r'(?:choose|select|pick|go\s+with|opt\s+for)\s+'
-            r'(?:option\s*)?[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?',
-            "decision_modal",
-        ),
-    ]
-    for sentence in reversed(tail_sentences):
-        for pattern, strategy in best_choice_patterns:
-            choice = _last_valid_match(pattern, sentence, valid)
-            if choice:
-                return ChoiceParseResult(choice=choice, strategy=strategy)
-
     lines = [line.strip() for line in tail.splitlines() if line.strip()]
 
-    # 7) Short explicit answer lines near the end.
+    # 3) Short explicit answer lines near the end. This is more reliable than
+    # earlier reasoning mentions like "if you choose option 1".
     for line in reversed(lines[-8:]):
         if len(line) > 90:
             continue
@@ -238,38 +260,113 @@ def extract_choice_with_strategy(
         if token in valid:
             return ChoiceParseResult(choice=token, strategy="short_answer_line")
 
+    # 4) Explicit answer markers.
+    answer_records = _valid_match_records(
+        r'(?:final\s+answer|final|answer|my\s+answer|choice)\s*[:\-]?\s*'
+        r'(?:is\s+)?(?:option\s*)?[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?'
+        r'(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))',
+        tail,
+        valid,
+    )
+    for token, match in reversed(answer_records):
+        if not _is_hedged_or_ambiguous_match(tail, match):
+            return ChoiceParseResult(choice=token, strategy="answer_marker")
+
+    # 5) Decision verbs.
+    decision_records = _valid_match_records(
+        r"\bi(?:'d|'ll)?\s+(?:(?:would|will|should|must|ought\s+to)\s+)?"
+        r"(?:choose|select|pick|chose|selected|choosing|picking|opt\s+for|go\s+with|"
+        r"prefer|recommend|suggest)\s+(?:option\s*)?[\(\[]?\s*"
+        r"([a-z0-9ivx]+)\s*[\)\]]?(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))",
+        tail,
+        valid,
+    )
+    for token, match in reversed(decision_records):
+        if not _is_hedged_or_ambiguous_match(tail, match):
+            return ChoiceParseResult(choice=token, strategy="decision_verb")
+
+    # 6) Conclusive statement about best/most attractive option.
+    option_is_records = _valid_match_records(
+        r'\boption\s*[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\s+'
+        r'(?:is|seems|looks|appears|has)\s+(?:the\s+)?'
+        r'(?:best|better|preferred|preferable|optimal|most\s+attractive)'
+        r'(?:\s+(?:choice|option|pick|one))?',
+        tail,
+        valid,
+    )
+    for token, match in reversed(option_is_records):
+        if not _is_hedged_or_ambiguous_match(tail, match):
+            return ChoiceParseResult(choice=token, strategy="option_is_best")
+
+    # 7) Conclusive last-sentence forms often emitted inside thinking-only blocks.
+    tail_sentences = _tail_sentences(tail)
+
+    best_choice_patterns = [
+        (
+            r'(?:therefore|thus|so|hence|overall|ultimately)?\s*,?\s*(?:the\s+)?'
+            r'(?:best|preferred|correct|right|optimal|most\s+attractive)\s+'
+            r'(?:option|choice|answer)\s*(?:is|would\s+be|seems\s+to\s+be)\s*'
+            r'(?:option\s*)?[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?'
+            r'(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|overall|therefore|thus|hence)\b))',
+            "best_choice_is",
+        ),
+        (
+            r'(?:therefore|thus|so|hence|overall|ultimately)?\s*,?\s*'
+            r'i\s+(?:should|would|will|must|ought\s+to)\s+'
+            r'(?:choose|select|pick|go\s+with|opt\s+for)\s+'
+            r'(?:option\s*)?[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?'
+            r'(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|overall|therefore|thus|hence)\b))',
+            "decision_modal",
+        ),
+    ]
+    for sentence in reversed(tail_sentences):
+        for pattern, strategy in best_choice_patterns:
+            choice = _last_valid_match(pattern, sentence, valid)
+            if choice:
+                return ChoiceParseResult(choice=choice, strategy=strategy)
+
     # 8) If the entire response is just the option token.
     compact = re.sub(r"\s+", "", text)
     compact = _normalize_label_token(compact)
     if compact in valid:
         return ChoiceParseResult(choice=compact, strategy="bare_token")
 
-    # 9) Last-line fallback for terse outputs like "Option (2).".
-    tail_lines = "\n".join(lines[-3:])
-    fallback_hits = _extract_valid_matches(
-        r"\boption\s*[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\b",
-        tail_lines,
-        valid,
-    )
-    if fallback_hits:
-        unique = set(fallback_hits)
-        if len(unique) == 1:
-            return ChoiceParseResult(choice=fallback_hits[-1], strategy="tail_option_fallback")
-
-    # 10) Final-sentence fallback for embedded choices like
+    # 9) Final-sentence fallback for embedded choices like
     # "option 3 is the one I should choose" or "I'm going to choose option 3".
     final_sentence = tail_sentences[-1] if tail_sentences else ""
     styled_valid = _valid_options_for_style(num_options, label_style)
     if final_sentence and styled_valid:
-        option_prefixed_hits = _extract_valid_matches(
+        sentence_has_decision_cue = bool(
+            re.search(
+                r"\b(?:choose|pick|select|go\s+with|opt\s+for|prefer|recommend|suggest)\b",
+                final_sentence,
+                flags=re.IGNORECASE,
+            )
+        )
+        ambiguous_suffix_hits = _extract_valid_matches(
+            r"\b(?:or|and)\s+(?:option\s*)?[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?"
+            r'(?=\s*(?:$|[\n\r\.\,\;\:\!\)]))',
+            final_sentence,
+            styled_valid,
+        )
+        if ambiguous_suffix_hits:
+            return ChoiceParseResult(choice=None, strategy=None)
+
+        option_prefixed_records = _valid_match_records(
             r"\boption\s*[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\b",
             final_sentence,
             styled_valid,
         )
-        if option_prefixed_hits and len(set(option_prefixed_hits)) == 1:
+        option_prefixed_hits = [token for token, _ in option_prefixed_records]
+        if (
+            sentence_has_decision_cue
+            and option_prefixed_hits
+            and len(set(option_prefixed_hits)) == 1
+            and all(not _is_hedged_or_ambiguous_match(final_sentence, match) for _, match in option_prefixed_records)
+        ):
             return ChoiceParseResult(choice=option_prefixed_hits[-1], strategy="final_sentence_option")
 
-        if label_style == "numbers":
+        if label_style == "numbers" and sentence_has_decision_cue:
             standalone_number_hits = _extract_valid_matches(
                 r"(?<![\w.])([0-9]+)(?![\w.%])",
                 final_sentence,

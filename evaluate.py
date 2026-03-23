@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import torch
 
-from answer_parser import extract_choice_with_strategy, infer_option_label_style
+from answer_parser import apply_finish_reason_safeguard, extract_choice_with_strategy, infer_option_label_style
 from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
 
 try:
@@ -1658,6 +1658,7 @@ def run_single_alpha_eval(
                 sit["num_options"],
                 label_style=sit.get("answer_label_style"),
             )
+            parse_result = apply_finish_reason_safeguard(parse_result, metadata.get("finish_reason"))
             choice = parse_result.choice
             parser_strategy = parse_result.strategy
             choice_index = label_to_option_number(choice) if choice else None

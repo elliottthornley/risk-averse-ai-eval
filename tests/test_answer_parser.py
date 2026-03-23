@@ -62,6 +62,24 @@ class AnswerParserTests(unittest.TestCase):
         self.assertEqual(result.choice, "b")
         self.assertIn(result.strategy, {"answer_marker", "short_answer_line"})
 
+    def test_chosen_option_line(self):
+        text = "Reasoning summary\\n\\nChosen Option: 1"
+        result = extract_choice_with_strategy(text, num_options=2)
+        self.assertEqual(result.choice, "1")
+        self.assertEqual(result.strategy, "short_answer_line")
+
+    def test_selected_option_line_after_thinking_block(self):
+        text = "<think>Option 1 is better.</think>\\n\\nSelected Option: (1)"
+        result = extract_choice_with_strategy(text, num_options=2)
+        self.assertEqual(result.choice, "1")
+        self.assertEqual(result.strategy, "short_answer_line")
+
+    def test_choose_the_first_option(self):
+        text = "After weighing the upside, I'll choose the first option."
+        result = extract_choice_with_strategy(text, num_options=3)
+        self.assertEqual(result.choice, "1")
+        self.assertEqual(result.strategy, "decision_verb")
+
     def test_final_bare_answer_line_overrides_earlier_reasoning_mentions(self):
         text = (
             "<think>If you choose option 1, you keep the safer payoff. "

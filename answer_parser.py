@@ -22,6 +22,19 @@ _ROMAN_TO_INT = {
     "x": 10,
 }
 
+_ORDINAL_TO_INT = {
+    "first": 1,
+    "second": 2,
+    "third": 3,
+    "fourth": 4,
+    "fifth": 5,
+    "sixth": 6,
+    "seventh": 7,
+    "eighth": 8,
+    "ninth": 9,
+    "tenth": 10,
+}
+
 _TRUNCATION_SAFE_STRATEGIES = frozenset(
     {
         "json",
@@ -55,6 +68,8 @@ def _normalize_label_token(token: str) -> str:
     s = s.strip(" \t\r\n'\"`*_[](){}<>.,;:!?")
     if s in _ROMAN_TO_INT:
         s = str(_ROMAN_TO_INT[s])
+    if s in _ORDINAL_TO_INT:
+        s = str(_ORDINAL_TO_INT[s])
     return s
 
 
@@ -227,6 +242,11 @@ def extract_choice_with_strategy(
     tail = text[-3000:] if len(text) > 3000 else text
     valid = _valid_options(num_options)
 
+    explicit_marker = (
+        r'(?:final\s+answer|final|answer|my\s+answer|choice|'
+        r'chosen\s+(?:option|answer)|selected\s+(?:option|answer))'
+    )
+
     # 1) JSON answer format (most explicit).
     json_choice = _last_valid_match(
         r'\{\s*["\']answer["\']\s*:\s*["\']?\s*([a-z0-9ivx]+)\s*["\']?\s*\}',
@@ -249,8 +269,8 @@ def extract_choice_with_strategy(
         if len(line) > 90:
             continue
         m = re.fullmatch(
-            r'(?:final\s+answer|final|answer|choice)?\s*[:\-]?\s*(?:is\s+)?'
-            r'(?:option\s*)?[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\.?',
+            rf'(?:{explicit_marker})?\s*[:\-]?\s*(?:is\s+)?'
+            r'(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?\.?',
             line,
             flags=re.IGNORECASE,
         )
@@ -262,8 +282,8 @@ def extract_choice_with_strategy(
 
     # 4) Explicit answer markers.
     answer_records = _valid_match_records(
-        r'(?:final\s+answer|final|answer|my\s+answer|choice)\s*[:\-]?\s*'
-        r'(?:is\s+)?(?:option\s*)?[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?'
+        rf'{explicit_marker}\s*[:\-]?\s*'
+        r'(?:is\s+)?(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?'
         r'(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))',
         tail,
         valid,
@@ -276,8 +296,9 @@ def extract_choice_with_strategy(
     decision_records = _valid_match_records(
         r"\bi(?:'d|'ll)?\s+(?:(?:would|will|should|must|ought\s+to)\s+)?"
         r"(?:choose|select|pick|chose|selected|choosing|picking|opt\s+for|go\s+with|"
-        r"prefer|recommend|suggest)\s+(?:option\s*)?[\(\[]?\s*"
-        r"([a-z0-9ivx]+)\s*[\)\]]?(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))",
+        r"prefer|recommend|suggest)\s+(?:option\s*)?[\(\[]?\s*(?:the\s+)?"
+        r"([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?"
+        r"(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))",
         tail,
         valid,
     )
@@ -306,7 +327,7 @@ def extract_choice_with_strategy(
             r'(?:therefore|thus|so|hence|overall|ultimately)?\s*,?\s*(?:the\s+)?'
             r'(?:best|preferred|correct|right|optimal|most\s+attractive)\s+'
             r'(?:option|choice|answer)\s*(?:is|would\s+be|seems\s+to\s+be)\s*'
-            r'(?:option\s*)?[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?'
+            r'(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?'
             r'(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|overall|therefore|thus|hence)\b))',
             "best_choice_is",
         ),
@@ -314,7 +335,7 @@ def extract_choice_with_strategy(
             r'(?:therefore|thus|so|hence|overall|ultimately)?\s*,?\s*'
             r'i\s+(?:should|would|will|must|ought\s+to)\s+'
             r'(?:choose|select|pick|go\s+with|opt\s+for)\s+'
-            r'(?:option\s*)?[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?'
+            r'(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?'
             r'(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|overall|therefore|thus|hence)\b))',
             "decision_modal",
         ),

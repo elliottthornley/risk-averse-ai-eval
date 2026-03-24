@@ -260,6 +260,9 @@ DATASET_VARIANT_SYNONYMS = {
 }
 REQUIRED_COLUMNS = {"situation_id", "prompt_text", "option_index", "option_type"}
 CARA_COLUMNS = {"is_best_cara_display", "CARA_correct_labels", "CARA_alpha_0_01_best_labels"}
+LINEAR_COLUMNS = {"is_best_linear_display", "linear_correct_labels", "linear_best_labels"}
+PREFERRED_CARA_LABEL_COLUMNS = ("CARA_correct_labels", "CARA_alpha_0_01_best_labels")
+PREFERRED_LINEAR_LABEL_COLUMNS = ("linear_correct_labels", "linear_best_labels")
 LIN_ONLY_BUCKET_LABELS = {"lin_only", "linear_only"}
 SUBSET_TYPES = ("rebels_only", "steals_only")
 PROBABILITY_FORMATS = ("numerical", "verbal")
@@ -323,6 +326,22 @@ def validate_dataset_columns(df, dataset_path):
             "Dataset is missing CARA-label columns. Expected at least one of "
             f"{sorted(CARA_COLUMNS)}\nDataset path: {dataset_path}"
         )
+
+
+def option_numbers_from_label_columns(sit_data: pd.DataFrame, column_names) -> set:
+    """Parse 1-based option numbers from the first available label-list column."""
+    for column_name in column_names:
+        if column_name not in sit_data.columns:
+            continue
+        labels = parse_label_list(sit_data[column_name].iloc[0])
+        option_numbers = {
+            label_to_option_number(label)
+            for label in labels
+            if label_to_option_number(label) is not None
+        }
+        if option_numbers:
+            return option_numbers
+    return set()
 
 
 def remove_instruction_suffix(prompt):
@@ -1170,28 +1189,20 @@ def build_situations(df: pd.DataFrame, num_situations: int):
                 int(idx) for idx in sit_data.loc[sit_data["is_best_linear_display"] == True, "option_index"]
             )
             linear_best_option_numbers = {idx + 1 for idx in linear_best_indices_0}
-        elif "linear_best_labels" in df.columns:
+        elif any(column in df.columns for column in PREFERRED_LINEAR_LABEL_COLUMNS):
             has_linear_info = True
-            lin_labels = parse_label_list(sit_data["linear_best_labels"].iloc[0])
-            linear_best_option_numbers = {
-                label_to_option_number(l) for l in lin_labels if label_to_option_number(l) is not None
-            }
+            linear_best_option_numbers = option_numbers_from_label_columns(
+                sit_data,
+                PREFERRED_LINEAR_LABEL_COLUMNS,
+            )
             linear_best_indices_0 = {n - 1 for n in linear_best_option_numbers}
         if not linear_best_option_numbers:
             has_linear_info = False
 
-        cara001_best_option_numbers = set()
-        if "CARA_correct_labels" in df.columns:
-            cara_labels = parse_label_list(sit_data["CARA_correct_labels"].iloc[0])
-            cara001_best_option_numbers = {
-                label_to_option_number(l) for l in cara_labels if label_to_option_number(l) is not None
-            }
-
-        if not cara001_best_option_numbers and "CARA_alpha_0_01_best_labels" in df.columns:
-            cara001_labels = parse_label_list(sit_data["CARA_alpha_0_01_best_labels"].iloc[0])
-            cara001_best_option_numbers = {
-                label_to_option_number(l) for l in cara001_labels if label_to_option_number(l) is not None
-            }
+        cara001_best_option_numbers = option_numbers_from_label_columns(
+            sit_data,
+            PREFERRED_CARA_LABEL_COLUMNS,
+        )
 
         if not cara001_best_option_numbers and "is_best_cara_display" in df.columns:
             cara001_best_option_numbers = {

@@ -113,6 +113,8 @@ def load_risk_averse_dataset(
         best_linear_labels: Set[str] = set()
         if "is_best_linear_display" in sit_data.columns:
             best_linear_labels = _labels_from_bool_column(sit_data, "is_best_linear_display")
+        if not best_linear_labels and "linear_correct_labels" in sit_data.columns:
+            best_linear_labels = _labels_from_label_column(sit_data, "linear_correct_labels")
         if not best_linear_labels and "linear_best_labels" in sit_data.columns:
             best_linear_labels = _labels_from_label_column(sit_data, "linear_best_labels")
 

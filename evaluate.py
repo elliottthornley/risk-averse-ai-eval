@@ -262,6 +262,7 @@ REQUIRED_COLUMNS = {"situation_id", "prompt_text", "option_index", "option_type"
 CARA_COLUMNS = {"is_best_cara_display", "CARA_correct_labels", "CARA_alpha_0_01_best_labels"}
 LIN_ONLY_BUCKET_LABELS = {"lin_only", "linear_only"}
 SUBSET_TYPES = ("rebels_only", "steals_only")
+PROBABILITY_FORMATS = ("numerical", "verbal")
 
 
 def resolve_path(path):
@@ -789,38 +790,65 @@ def summarize_result_payload(results: List[Dict]) -> Dict:
     }
 
 
-def summarize_results_by_subset_type(results: List[Dict], situation_manifest: List[Dict]) -> Dict:
-    """Compute the same metric bundle for rebels_only and steals_only subsets."""
-    target_ids_by_subset_type = {subset_type: [] for subset_type in SUBSET_TYPES}
+def summarize_manifest_counts(
+    situation_manifest: List[Dict],
+    *,
+    field_name: str,
+    ordered_values: List[str],
+) -> Dict:
+    """Count selected situations by one ordered manifest field."""
+    counts = {}
+    for value in ordered_values:
+        count = sum(1 for entry in situation_manifest if entry.get(field_name) == value)
+        if count:
+            counts[value] = count
+    return counts
+
+
+def summarize_results_by_field(
+    results: List[Dict],
+    situation_manifest: List[Dict],
+    *,
+    field_name: str,
+    ordered_values: List[str],
+) -> Dict:
+    """Compute the standard metric bundle for one ordered manifest field."""
+    target_ids_by_value = {value: [] for value in ordered_values}
     for entry in situation_manifest:
-        subset_type = entry.get("subset_type")
-        if subset_type in target_ids_by_subset_type:
-            target_ids_by_subset_type[subset_type].append(entry["situation_id"])
+        value = entry.get(field_name)
+        if value in target_ids_by_value:
+            target_ids_by_value[value].append(entry["situation_id"])
 
     summarized = {}
-    for subset_type in SUBSET_TYPES:
-        target_ids = target_ids_by_subset_type[subset_type]
+    for value in ordered_values:
+        target_ids = target_ids_by_value[value]
         if not target_ids:
             continue
-        subset_results = [row for row in results if row.get("subset_type") == subset_type]
-        summarized[subset_type] = summarize_result_payload(subset_results)
+        field_results = [row for row in results if row.get(field_name) == value]
+        summarized[value] = summarize_result_payload(field_results)
     return summarized
 
 
-def summarize_progress_by_subset_type(results: List[Dict], situation_manifest: List[Dict]) -> Dict:
-    """Track completion progress separately for rebels_only and steals_only slices."""
+def summarize_progress_by_field(
+    results: List[Dict],
+    situation_manifest: List[Dict],
+    *,
+    field_name: str,
+    ordered_values: List[str],
+) -> Dict:
+    """Track completion progress separately for one ordered manifest field."""
     completed_ids = {row.get("situation_id") for row in results if row.get("situation_id") is not None}
     progress = {}
-    for subset_type in SUBSET_TYPES:
-        subset_ids = [entry["situation_id"] for entry in situation_manifest if entry.get("subset_type") == subset_type]
-        if not subset_ids:
+    for value in ordered_values:
+        field_ids = [entry["situation_id"] for entry in situation_manifest if entry.get(field_name) == value]
+        if not field_ids:
             continue
-        completed = sum(1 for sid in subset_ids if sid in completed_ids)
-        next_situation_id = next((sid for sid in subset_ids if sid not in completed_ids), None)
-        progress[subset_type] = {
-            "target_total": len(subset_ids),
+        completed = sum(1 for sid in field_ids if sid in completed_ids)
+        next_situation_id = next((sid for sid in field_ids if sid not in completed_ids), None)
+        progress[value] = {
+            "target_total": len(field_ids),
             "completed": completed,
-            "remaining": max(len(subset_ids) - completed, 0),
+            "remaining": max(len(field_ids) - completed, 0),
             "next_situation_id": next_situation_id,
         }
     return progress
@@ -995,11 +1023,16 @@ def save_incremental(
     target_total = len(target_situation_ids)
     target_completed = sum(1 for sid in target_situation_ids if sid in done_ids)
     next_situation_id = next((sid for sid in target_situation_ids if sid not in done_ids), None)
-    selected_subset_type_counts = {
-        subset_type: sum(1 for entry in situation_manifest if entry.get("subset_type") == subset_type)
-        for subset_type in SUBSET_TYPES
-        if any(entry.get("subset_type") == subset_type for entry in situation_manifest)
-    }
+    selected_subset_type_counts = summarize_manifest_counts(
+        situation_manifest,
+        field_name="subset_type",
+        ordered_values=list(SUBSET_TYPES),
+    )
+    selected_probability_format_counts = summarize_manifest_counts(
+        situation_manifest,
+        field_name="probability_format",
+        ordered_values=list(PROBABILITY_FORMATS),
+    )
 
     eval_cfg = {
         "backend": args.backend,
@@ -1030,6 +1063,7 @@ def save_incremental(
         "steering_apply_mode": args.steering_apply_mode,
         "selected_situation_ids": target_situation_ids,
         "selected_subset_type_counts": selected_subset_type_counts,
+        "selected_probability_format_counts": selected_probability_format_counts,
         "selected_situations": situation_manifest,
     }
     if args.backend == "vllm":
@@ -1042,8 +1076,33 @@ def save_incremental(
     stored_results = results if not args.no_save_responses else drop_response_text(results)
     if not args.no_save_responses:
         stored_results = [project_result_row_for_output(row, include_response=True) for row in results]
-    metrics_by_subset_type = summarize_results_by_subset_type(results, situation_manifest)
-    progress_by_subset_type = summarize_progress_by_subset_type(results, situation_manifest)
+    subset_metrics = summarize_results_by_field(
+        results,
+        situation_manifest,
+        field_name="subset_type",
+        ordered_values=list(SUBSET_TYPES),
+    )
+    probability_format_metrics = summarize_results_by_field(
+        results,
+        situation_manifest,
+        field_name="probability_format",
+        ordered_values=list(PROBABILITY_FORMATS),
+    )
+    metrics_by_subset_type = {**subset_metrics, **probability_format_metrics}
+    progress_by_subset_type = {
+        **summarize_progress_by_field(
+            results,
+            situation_manifest,
+            field_name="subset_type",
+            ordered_values=list(SUBSET_TYPES),
+        ),
+        **summarize_progress_by_field(
+            results,
+            situation_manifest,
+            field_name="probability_format",
+            ordered_values=list(PROBABILITY_FORMATS),
+        ),
+    }
 
     output_data = convert_numpy(
         {
@@ -1053,6 +1112,7 @@ def save_incremental(
             "num_total": summary_payload["num_total"],
             "num_parse_failed": parse_failed_total,
             "metrics_by_subset_type": metrics_by_subset_type,
+            "metrics_by_probability_format": probability_format_metrics,
             "results": stored_results,
             "resume_records": compact_results_for_resume(results),
             "failed_responses": failed_sample,  # Backwards-compatible key name.
@@ -1065,6 +1125,12 @@ def save_incremental(
                 "checkpoint_index": situations_evaluated,
             },
             "progress_by_subset_type": progress_by_subset_type,
+            "progress_by_probability_format": summarize_progress_by_field(
+                results,
+                situation_manifest,
+                field_name="probability_format",
+                ordered_values=list(PROBABILITY_FORMATS),
+            ),
         }
     )
 
@@ -1774,7 +1840,20 @@ def run_single_alpha_eval(
     metrics = summary_payload["metrics"]
     valid = [r for r in results if r["option_type"] is not None]
     parse_failed_total = summary_payload["num_parse_failed"]
-    metrics_by_subset_type = summarize_results_by_subset_type(results, situation_manifest)
+    metrics_by_subset_type = {
+        **summarize_results_by_field(
+            results,
+            situation_manifest,
+            field_name="subset_type",
+            ordered_values=list(SUBSET_TYPES),
+        ),
+        **summarize_results_by_field(
+            results,
+            situation_manifest,
+            field_name="probability_format",
+            ordered_values=list(PROBABILITY_FORMATS),
+        ),
+    }
 
     print(f"\n{'='*50}")
     print("EVALUATION RESULTS (Permissive Parser)")
@@ -1789,14 +1868,14 @@ def run_single_alpha_eval(
     print(f"% choosing best CARA: {100*metrics['best_cara_rate']:.1f}%")
     print(f"% choosing best LIN:  {100*metrics['best_linear_rate']:.1f}%")
     if metrics_by_subset_type:
-        print("\nBy subset type:")
-        for subset_type in SUBSET_TYPES:
-            subset_payload = metrics_by_subset_type.get(subset_type)
+        print("\nBy subset type / probability format:")
+        for group_name in list(SUBSET_TYPES) + list(PROBABILITY_FORMATS):
+            subset_payload = metrics_by_subset_type.get(group_name)
             if not subset_payload:
                 continue
             subset_metrics = subset_payload["metrics"]
             print(
-                f"  {subset_type}: valid={subset_payload['num_valid']}/{subset_payload['num_total']} | "
+                f"  {group_name}: valid={subset_payload['num_valid']}/{subset_payload['num_total']} | "
                 f"coop={100*subset_metrics['cooperate_rate']:.1f}% | "
                 f"rebel={100*subset_metrics['rebel_rate']:.1f}% | "
                 f"steal={100*subset_metrics['steal_rate']:.1f}% | "

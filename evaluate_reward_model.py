@@ -15,7 +15,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from statistics import median
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
@@ -653,17 +653,55 @@ def build_preference_pairs(df: pd.DataFrame) -> List[Dict[str, Any]]:
     return pairs
 
 
-def slice_pairs(
+def select_pairs(
     pairs: List[Dict[str, Any]],
     *,
     start_position: int,
     end_position: Optional[int],
     num_pairs: int,
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
     sliced = [pair for pair in pairs if pair["dataset_position"] >= start_position]
     if end_position is not None:
         sliced = [pair for pair in sliced if pair["dataset_position"] <= end_position]
-    return sliced[:num_pairs]
+
+    selected: List[Dict[str, Any]] = []
+    seen_situation_ids: Set[int] = set()
+    duplicate_situation_rows_skipped = 0
+    rows_without_situation_id = 0
+
+    for pair in sliced:
+        situation_id = pair.get("situation_id")
+        if situation_id is None:
+            rows_without_situation_id += 1
+            selected.append(pair)
+        elif situation_id in seen_situation_ids:
+            duplicate_situation_rows_skipped += 1
+            continue
+        else:
+            seen_situation_ids.add(situation_id)
+            selected.append(pair)
+
+        if len(selected) >= num_pairs:
+            break
+
+    selection_stats = {
+        "raw_pair_rows_in_slice": len(sliced),
+        "selected_unique_rows": len(selected),
+        "duplicate_situation_rows_skipped": duplicate_situation_rows_skipped,
+        "rows_without_situation_id": rows_without_situation_id,
+    }
+    return selected, selection_stats
+
+
+def ensure_output_path_is_safe(output_path: str, *, resume: bool):
+    if resume:
+        return
+    if Path(output_path).exists():
+        raise FileExistsError(
+            "Output file already exists. To continue the interrupted run, re-run with "
+            f"--resume --output {output_path}. To start fresh, choose a new --output path "
+            "or delete the old output file first."
+        )
 
 
 def score_batch(
@@ -763,6 +801,7 @@ def save_incremental(
     results: List[Dict[str, Any]],
     target_pairs: List[Dict[str, Any]],
     *,
+    selection_stats: Optional[Dict[str, int]] = None,
     create_backup: bool = False,
 ):
     pair_manifest = build_pair_manifest(target_pairs)
@@ -812,6 +851,10 @@ def save_incremental(
         "csv_path": args.csv_path,
         "save_every": args.save_every,
         "backup_every": args.backup_every,
+        "selection_unit": "unique_situations",
+        "raw_pair_rows_in_slice": (selection_stats or {}).get("raw_pair_rows_in_slice", target_total),
+        "duplicate_situation_rows_skipped": (selection_stats or {}).get("duplicate_situation_rows_skipped", 0),
+        "rows_without_situation_id": (selection_stats or {}).get("rows_without_situation_id", 0),
         "selected_pair_ids": target_pair_ids,
         "selected_subset_type_counts": selected_subset_type_counts,
         "selected_probability_format_counts": selected_probability_format_counts,
@@ -884,7 +927,12 @@ def main():
         help="Advanced: path to custom pairwise CSV dataset (overrides --dataset)",
     )
     parser.add_argument("--list_datasets", action="store_true", help="List built-in reward-model datasets and exit")
-    parser.add_argument("--num_pairs", type=int, default=50, help="Number of pairwise rows to evaluate")
+    parser.add_argument(
+        "--num_pairs",
+        type=int,
+        default=50,
+        help="Number of unique situations to evaluate (keeps the first pair row for each situation_id)",
+    )
     parser.add_argument("--output", type=str, default=None, help="Output JSON path (auto-generated if omitted)")
     parser.add_argument(
         "--batch_size",
@@ -939,20 +987,20 @@ def main():
         "--stop_after",
         type=int,
         default=50,
-        help="Evaluate at most this many NEW pairs in this invocation (default: 50)",
+        help="Evaluate at most this many NEW unique situations in this invocation (default: 50)",
     )
     parser.add_argument("--resume", action="store_true", help="Resume from existing output JSON if present")
     parser.add_argument(
         "--save_every",
         type=int,
         default=16,
-        help="Write checkpoint every N newly evaluated pairs (default: 16, aligned with default batch_size)",
+        help="Write checkpoint every N newly evaluated situations (default: 16, aligned with default batch_size)",
     )
     parser.add_argument(
         "--backup_every",
         type=int,
         default=80,
-        help="Write .bak backup every N newly evaluated pairs (default: 80, 0 disables backups)",
+        help="Write .bak backup every N newly evaluated situations (default: 80, 0 disables backups)",
     )
     parser.add_argument(
         "--torch_dtype",
@@ -1021,19 +1069,20 @@ def main():
         raise ValueError("--backup_every must be >= 0")
 
     output_path = resolve_path(args.output) if args.output else auto_output_path(args)
+    ensure_output_path_is_safe(output_path, resume=args.resume)
 
     df = pd.read_csv(args.csv_path)
     df = df.loc[:, [col for col in df.columns if not str(col).startswith("Unnamed:")]].copy()
     validate_dataset_columns(df, args.csv_path)
     all_pairs = build_preference_pairs(df)
-    selected_pairs = slice_pairs(
+    selected_pairs, selection_stats = select_pairs(
         all_pairs,
         start_position=args.start_position,
         end_position=args.end_position,
         num_pairs=args.num_pairs,
     )
     if not selected_pairs:
-        raise ValueError("No reward-model pairs selected after applying dataset slice arguments.")
+        raise ValueError("No reward-model situations selected after applying dataset slice arguments.")
 
     for pair in selected_pairs:
         pair["prompt"] = build_eval_prompt(pair["prompt_raw"], args.prompt_suffix)
@@ -1059,8 +1108,21 @@ def main():
     print("Reward model evaluation configuration:")
     print(f"  Dataset: {args.dataset}")
     print(f"  CSV path: {args.csv_path}")
-    print(f"  Selected pairs in slice: {len(selected_pairs)}")
-    print(f"  Pending pairs this invocation: {len(pending_pairs)}")
+    print(
+        "  Selected unique situations in slice: "
+        f"{len(selected_pairs)} (from {selection_stats['raw_pair_rows_in_slice']} pair rows)"
+    )
+    if selection_stats["duplicate_situation_rows_skipped"]:
+        print(
+            "  Duplicate situation rows skipped: "
+            f"{selection_stats['duplicate_situation_rows_skipped']}"
+        )
+    if selection_stats["rows_without_situation_id"]:
+        print(
+            "  Rows without situation_id kept as separate evaluations: "
+            f"{selection_stats['rows_without_situation_id']}"
+        )
+    print(f"  Pending situations this invocation: {len(pending_pairs)}")
     print(f"  Batch size: {args.batch_size}")
     print(f"  Length-aware batching: {'OFF' if args.disable_length_sort else 'ON'}")
     print(f"  Max input length: {args.max_length}")
@@ -1077,8 +1139,15 @@ def main():
         )
 
     if not pending_pairs:
-        print("No pending reward-model pairs left to evaluate in this invocation. Refreshing summary JSON.")
-        save_incremental(output_path, args, results, selected_pairs, create_backup=False)
+        print("No pending reward-model situations left to evaluate in this invocation. Refreshing summary JSON.")
+        save_incremental(
+            output_path,
+            args,
+            results,
+            selected_pairs,
+            selection_stats=selection_stats,
+            create_backup=False,
+        )
         return
 
     model, tokenizer = load_reward_model(args)
@@ -1125,6 +1194,7 @@ def main():
                 args,
                 results,
                 selected_pairs,
+                selection_stats=selection_stats,
                 create_backup=crossed_backup_boundary,
             )
 

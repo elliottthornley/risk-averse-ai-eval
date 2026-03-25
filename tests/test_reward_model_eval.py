@@ -1,4 +1,5 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -8,7 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from evaluate_reward_model import summarize_pairwise_results
+from evaluate_reward_model import ensure_output_path_is_safe, select_pairs, summarize_pairwise_results
 from prepare_reward_model_eval_dataset import (
     alternate_by_subset_type,
     apply_prompt_choice_verb_mix,
@@ -124,6 +125,39 @@ class RewardModelMetricTests(unittest.TestCase):
         self.assertAlmostEqual(summary["metrics"]["pairwise_accuracy_when_accepted_longer"], 1.0)
         self.assertAlmostEqual(summary["metrics"]["pairwise_accuracy_when_rejected_longer"], 0.0)
         self.assertAlmostEqual(summary["metrics"]["pairwise_accuracy_when_same_length"], 0.0)
+
+
+class RewardModelSelectionTests(unittest.TestCase):
+    def test_select_pairs_keeps_first_row_per_situation_id(self):
+        pairs = [
+            {"pair_id": 1, "dataset_position": 1, "situation_id": 10},
+            {"pair_id": 2, "dataset_position": 2, "situation_id": 10},
+            {"pair_id": 3, "dataset_position": 3, "situation_id": 11},
+            {"pair_id": 4, "dataset_position": 4, "situation_id": 12},
+        ]
+        selected, stats = select_pairs(pairs, start_position=1, end_position=None, num_pairs=3)
+        self.assertEqual([pair["pair_id"] for pair in selected], [1, 3, 4])
+        self.assertEqual(stats["raw_pair_rows_in_slice"], 4)
+        self.assertEqual(stats["duplicate_situation_rows_skipped"], 1)
+        self.assertEqual(stats["rows_without_situation_id"], 0)
+
+    def test_select_pairs_keeps_rows_without_situation_id(self):
+        pairs = [
+            {"pair_id": 1, "dataset_position": 1, "situation_id": None},
+            {"pair_id": 2, "dataset_position": 2, "situation_id": None},
+            {"pair_id": 3, "dataset_position": 3, "situation_id": 7},
+        ]
+        selected, stats = select_pairs(pairs, start_position=1, end_position=None, num_pairs=3)
+        self.assertEqual([pair["pair_id"] for pair in selected], [1, 2, 3])
+        self.assertEqual(stats["rows_without_situation_id"], 2)
+
+    def test_ensure_output_path_is_safe_blocks_overwrite_without_resume(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "existing.json"
+            output_path.write_text("{}", encoding="utf-8")
+            with self.assertRaises(FileExistsError):
+                ensure_output_path_is_safe(str(output_path), resume=False)
+            ensure_output_path_is_safe(str(output_path), resume=True)
 
 
 if __name__ == "__main__":

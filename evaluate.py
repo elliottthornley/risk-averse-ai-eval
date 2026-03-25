@@ -258,6 +258,20 @@ DATASET_VARIANT_SYNONYMS = {
     "combined": "combined",
     "unified": "combined",
 }
+DEFAULT_NUM_SITUATIONS_BY_DATASET = {
+    "low_stakes_training": 1000,
+    "low_stakes_validation": 1000,
+    "low_stakes_training_lin_only": 1000,
+    "low_stakes_validation_lin_only": 1000,
+    "medium_stakes_validation": 200,
+    "medium_stakes_validation_rebels_only": 200,
+    "medium_stakes_validation_steals_only": 500,
+    "high_stakes_test": 1000,
+    "high_stakes_test_rebels_only": 1000,
+    "astronomical_stakes_deployment": 1000,
+    "astronomical_stakes_deployment_rebels_only": 1000,
+    "steals_test": 1000,
+}
 REQUIRED_COLUMNS = {"situation_id", "prompt_text", "option_index", "option_type"}
 CARA_COLUMNS = {"is_best_cara_display", "CARA_correct_labels", "CARA_alpha_0_01_best_labels"}
 LINEAR_COLUMNS = {"is_best_linear_display", "linear_correct_labels", "linear_best_labels"}
@@ -288,6 +302,21 @@ def normalize_dataset_variant(dataset_variant: str) -> str:
             + ", ".join(sorted(DATASET_VARIANT_SYNONYMS))
         )
     return DATASET_VARIANT_SYNONYMS[normalized]
+
+
+def resolve_default_num_situations(args) -> Optional[int]:
+    """Return the recommended default situation count for the selected dataset."""
+    if args.dataset in DEFAULT_NUM_SITUATIONS_BY_DATASET:
+        return DEFAULT_NUM_SITUATIONS_BY_DATASET[args.dataset]
+    if args.dataset_base_alias == "medium_stakes_validation":
+        if args.resolved_dataset_variant == "rebels_only":
+            return 200
+        if args.resolved_dataset_variant == "steals_only":
+            return 500
+    if args.dataset_base_alias in {"high_stakes_test", "astronomical_stakes_deployment"}:
+        if args.resolved_dataset_variant in {"rebels_only", "steals_only"}:
+            return 1000
+    return None
 
 
 def resolve_builtin_dataset_path(dataset_name: str, dataset_variant: str):
@@ -598,7 +627,9 @@ def print_stop_resume_banner(
     completed: int,
     pending_this_invocation: int,
 ):
-    """Print a high-visibility stop/resume guide for co-authors."""
+    """Print a high-visibility stop/resume guide for explicit chunked runs."""
+    if args.stop_after is None:
+        return
     print("\n" + "!" * 88)
     print("IMPORTANT: CHUNKED EVAL MODE (STOP/RESUME QUICKSTART)")
     print("!" * 88)
@@ -1159,10 +1190,13 @@ def save_incremental(
         shutil.copy2(output_path, backup_path)
 
 
-def build_situations(df: pd.DataFrame, num_situations: int):
+def build_situations(df: pd.DataFrame, num_situations: Optional[int]):
     """Group rows into situation objects with option metadata."""
     situations = []
-    for dataset_position, sit_id in enumerate(df["situation_id"].unique()[:num_situations], start=1):
+    situation_ids = df["situation_id"].unique()
+    if num_situations is not None:
+        situation_ids = situation_ids[:num_situations]
+    for dataset_position, sit_id in enumerate(situation_ids, start=1):
         sit_data = df[df["situation_id"] == sit_id]
         prompt_raw = sit_data["prompt_text"].iloc[0]
         num_options = len(sit_data)
@@ -2009,7 +2043,16 @@ def main():
         help="Advanced: path to custom CSV dataset (overrides --dataset). --val_csv is kept as a legacy alias.",
     )
     parser.add_argument("--list_datasets", action="store_true", help="List built-in datasets and exit")
-    parser.add_argument("--num_situations", type=int, default=50, help="Number of situations to evaluate")
+    parser.add_argument(
+        "--num_situations",
+        type=int,
+        default=None,
+        help=(
+            "Number of situations to evaluate. If omitted, Evaluate.py uses the current "
+            "recommended default for the selected dataset (e.g. 200 for medium-stakes validation, "
+            "1000 for the main test sets)."
+        ),
+    )
     parser.add_argument("--output", type=str, default=None, help="Output JSON path (auto-generated if omitted)")
     parser.add_argument(
         "--no_save_responses",
@@ -2113,8 +2156,8 @@ def main():
     parser.add_argument(
         "--stop_after",
         type=int,
-        default=50,
-        help="Evaluate at most this many NEW situations in this invocation (default: 50)",
+        default=None,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--resume",
@@ -2317,6 +2360,8 @@ def main():
         raise ValueError("--start_position must be >= 1")
     if args.end_position is not None and args.end_position < args.start_position:
         raise ValueError("--end_position must be >= --start_position")
+    if args.num_situations is not None and args.num_situations < 1:
+        raise ValueError("--num_situations must be >= 1")
     if args.save_every < 1:
         raise ValueError("--save_every must be >= 1")
     if args.backup_every < 0:
@@ -2399,6 +2444,20 @@ def main():
     print(f"Dataset base alias: {args.dataset_base_alias}")
     print(f"Dataset variant: {args.resolved_dataset_variant}")
     print(f"Dataset path:  {args.csv_path}")
+    if args.num_situations is None:
+        default_num_situations = resolve_default_num_situations(args)
+        if default_num_situations is None:
+            default_num_situations = int(df["situation_id"].nunique())
+            print(
+                f"Num situations not specified; defaulting to full selected dataset "
+                f"({default_num_situations} situations)."
+            )
+        else:
+            print(
+                f"Num situations not specified; defaulting to the recommended current setting "
+                f"for {args.dataset}: {default_num_situations}."
+            )
+        args.num_situations = default_num_situations
     all_situations = build_situations(df, args.num_situations)
 
     end_position = args.end_position if args.end_position is not None else len(all_situations)

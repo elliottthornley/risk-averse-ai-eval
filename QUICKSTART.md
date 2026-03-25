@@ -21,7 +21,6 @@ python evaluate.py \
   --base_model Qwen/Qwen3-8B \
   --dataset medium_stakes_validation \
   --num_situations 200 \
-  --stop_after 200 \
   --batch_size 4 \
   --output medium_validation.json
 ```
@@ -32,25 +31,25 @@ The medium-stakes validation CSV has `500` situations total, but collaborators s
 
 ```bash
 # Low-stakes training source CSV
-python evaluate.py --dataset low_stakes_training --num_situations 1000 --stop_after 1000 --output low_stakes_training.json
+python evaluate.py --dataset low_stakes_training --num_situations 1000 --output low_stakes_training.json
 
 # Held-out low-stakes slice from the same source CSV
-python evaluate.py --dataset low_stakes_training --start_position 901 --end_position 1000 --num_situations 100 --stop_after 100 --output low_stakes_validation_slice.json
+python evaluate.py --dataset low_stakes_training --start_position 901 --end_position 1000 --num_situations 100 --output low_stakes_validation_slice.json
 
 # Medium-stakes validation (recommended default size: 200)
-python evaluate.py --dataset medium_stakes_validation --num_situations 200 --stop_after 200 --output medium_validation.json
+python evaluate.py --dataset medium_stakes_validation --num_situations 200 --output medium_validation.json
 
 # Medium-stakes steals-only alternative
-python evaluate.py --dataset medium_stakes_validation_steals_only --num_situations 500 --stop_after 500 --output medium_validation_steals.json
+python evaluate.py --dataset medium_stakes_validation_steals_only --num_situations 500 --output medium_validation_steals.json
 
 # High-stakes test
-python evaluate.py --dataset high_stakes_test --num_situations 1000 --stop_after 1000 --output high_stakes_test.json
+python evaluate.py --dataset high_stakes_test --num_situations 1000 --output high_stakes_test.json
 
 # Astronomical-stakes deployment
-python evaluate.py --dataset astronomical_stakes_deployment --num_situations 1000 --stop_after 1000 --output astronomical_stakes_deployment.json
+python evaluate.py --dataset astronomical_stakes_deployment --num_situations 1000 --output astronomical_stakes_deployment.json
 
 # Shared steals-only test
-python evaluate.py --dataset steals_test --num_situations 1000 --stop_after 1000 --output steals_test.json
+python evaluate.py --dataset steals_test --num_situations 1000 --output steals_test.json
 ```
 
 ## LIN-Only
@@ -62,7 +61,6 @@ python evaluate.py \
   --dataset low_stakes_training \
   --lin_only \
   --num_situations 1000 \
-  --stop_after 1000 \
   --output low_stakes_lin_only.json
 ```
 
@@ -72,7 +70,6 @@ Equivalent convenience alias:
 python evaluate.py \
   --dataset low_stakes_training_lin_only \
   --num_situations 1000 \
-  --stop_after 1000 \
   --output low_stakes_lin_only_alias.json
 ```
 
@@ -88,7 +85,6 @@ python evaluate.py \
   --base_model Qwen/Qwen3-8B \
   --dataset medium_stakes_validation \
   --num_situations 200 \
-  --stop_after 200 \
   --icv_pairs_jsonl data/dpo_lin_only_20260129_clarified.jsonl \
   --icv_layer 12 \
   --eval_layer 12 \
@@ -120,7 +116,7 @@ Defaults:
 
 - `--save_every 4`
 - `--backup_every 20`
-- `--stop_after 50`
+- `--stop_after` is off by default and is now mainly an advanced smoke-test / chunking flag
 
 Resume example:
 

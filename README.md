@@ -38,9 +38,15 @@ If you run [evaluate.py](/Users/elliottthornley/risk-averse-ai-eval/evaluate.py)
 - batch size: `4`
 - save every: `4`
 - backup every: `20`
-- stop after: `50`
+- `--stop_after`: off by default
 
-`--stop_after 50` means the default run is chunked. To run a full slice in one invocation, explicitly set both `--num_situations` and `--stop_after`.
+If you do not pass `--num_situations`, Evaluate.py now uses the current recommended dataset-specific default:
+
+- `low_stakes_training`: `1000`
+- `medium_stakes_validation`: `200`
+- `high_stakes_test`: `1000`
+- `astronomical_stakes_deployment`: `1000`
+- `steals_test`: `1000`
 
 ## Recommended Current Workflow
 
@@ -54,7 +60,6 @@ Use:
 python evaluate.py \
   --dataset medium_stakes_validation \
   --num_situations 200 \
-  --stop_after 200 \
   --output medium_validation.json
 ```
 
@@ -66,7 +71,6 @@ Use all `500` only if you specifically need them.
 python evaluate.py \
   --dataset high_stakes_test \
   --num_situations 1000 \
-  --stop_after 1000 \
   --output high_stakes_test.json
 ```
 
@@ -76,7 +80,6 @@ python evaluate.py \
 python evaluate.py \
   --dataset astronomical_stakes_deployment \
   --num_situations 1000 \
-  --stop_after 1000 \
   --output astronomical_stakes_deployment.json
 ```
 
@@ -86,7 +89,6 @@ python evaluate.py \
 python evaluate.py \
   --dataset steals_test \
   --num_situations 1000 \
-  --stop_after 1000 \
   --output steals_test.json
 ```
 
@@ -108,7 +110,6 @@ python evaluate.py \
   --start_position 901 \
   --end_position 1000 \
   --num_situations 100 \
-  --stop_after 100 \
   --output low_stakes_validation_slice.json
 ```
 
@@ -133,7 +134,6 @@ python evaluate.py \
   --dataset low_stakes_training \
   --lin_only \
   --num_situations 1000 \
-  --stop_after 1000 \
   --output low_stakes_lin_only.json
 ```
 
@@ -143,7 +143,6 @@ There is also a convenience alias:
 python evaluate.py \
   --dataset low_stakes_training_lin_only \
   --num_situations 1000 \
-  --stop_after 1000 \
   --output low_stakes_lin_only_alias.json
 ```
 
@@ -208,7 +207,6 @@ python evaluate.py \
   --base_model Qwen/Qwen3-8B \
   --dataset medium_stakes_validation \
   --num_situations 200 \
-  --stop_after 200 \
   --icv_pairs_jsonl data/dpo_lin_only_20260129_clarified.jsonl \
   --icv_layer 12 \
   --eval_layer 12 \
@@ -365,7 +363,7 @@ Defaults:
 
 - `--save_every 4`
 - `--backup_every 20`
-- `--stop_after 50`
+- `--stop_after` is off by default and is now mainly an advanced smoke-test / chunking flag
 
 Resume example:
 

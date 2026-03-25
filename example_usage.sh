@@ -14,7 +14,6 @@ python evaluate.py \
     --base_model "$BASE_MODEL" \
     --dataset medium_stakes_validation \
     --num_situations 200 \
-    --stop_after 200 \
     --output results_medium_validation.json
 
 echo ""
@@ -24,7 +23,6 @@ python evaluate.py \
     --base_model "$BASE_MODEL" \
     --dataset high_stakes_test \
     --num_situations 1000 \
-    --stop_after 1000 \
     --output results_high_stakes_test.json
 
 echo ""
@@ -34,7 +32,6 @@ python evaluate.py \
     --base_model "$BASE_MODEL" \
     --dataset astronomical_stakes_deployment \
     --num_situations 1000 \
-    --stop_after 1000 \
     --output results_astronomical_stakes_deployment.json
 
 echo ""
@@ -44,7 +41,6 @@ python evaluate.py \
     --base_model "$BASE_MODEL" \
     --dataset steals_test \
     --num_situations 1000 \
-    --stop_after 1000 \
     --output results_steals_test.json
 
 echo ""
@@ -54,7 +50,6 @@ python evaluate.py \
     --base_model "$BASE_MODEL" \
     --dataset low_stakes_training \
     --num_situations 1000 \
-    --stop_after 1000 \
     --output results_low_stakes_training.json
 
 echo ""
@@ -66,7 +61,6 @@ python evaluate.py \
     --start_position 901 \
     --end_position 1000 \
     --num_situations 100 \
-    --stop_after 100 \
     --output results_low_stakes_validation_slice.json
 
 echo ""
@@ -77,7 +71,6 @@ python evaluate.py \
     --dataset low_stakes_training \
     --lin_only \
     --num_situations 1000 \
-    --stop_after 1000 \
     --output results_low_stakes_lin_only.json
 
 echo ""

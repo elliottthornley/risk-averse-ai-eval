@@ -1,6 +1,7 @@
 These CSVs are retained for historical comparison runs only.
 
 They are not the current default datasets for `evaluate.py`.
+The same applies to the February 11 reward-model pair CSVs now stored here.
 
 Current defaults live in the parent `data/` directory:
 

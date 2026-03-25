@@ -128,28 +128,45 @@ class RewardModelMetricTests(unittest.TestCase):
 
 
 class RewardModelSelectionTests(unittest.TestCase):
-    def test_select_pairs_keeps_first_row_per_situation_id(self):
+    def test_select_pairs_drops_only_exact_duplicate_rows(self):
         pairs = [
-            {"pair_id": 1, "dataset_position": 1, "situation_id": 10},
-            {"pair_id": 2, "dataset_position": 2, "situation_id": 10},
-            {"pair_id": 3, "dataset_position": 3, "situation_id": 11},
-            {"pair_id": 4, "dataset_position": 4, "situation_id": 12},
+            {
+                "pair_id": 1,
+                "dataset_position": 1,
+                "situation_id": 10,
+                "prompt_raw": "p",
+                "accepted_response": "a",
+                "rejected_response": "r",
+            },
+            {
+                "pair_id": 2,
+                "dataset_position": 2,
+                "situation_id": 10,
+                "prompt_raw": "p",
+                "accepted_response": "a",
+                "rejected_response": "r",
+            },
+            {
+                "pair_id": 3,
+                "dataset_position": 3,
+                "situation_id": 10,
+                "prompt_raw": "p",
+                "accepted_response": "a2",
+                "rejected_response": "r2",
+            },
+            {
+                "pair_id": 4,
+                "dataset_position": 4,
+                "situation_id": 11,
+                "prompt_raw": "p2",
+                "accepted_response": "a3",
+                "rejected_response": "r3",
+            },
         ]
         selected, stats = select_pairs(pairs, start_position=1, end_position=None, num_pairs=3)
         self.assertEqual([pair["pair_id"] for pair in selected], [1, 3, 4])
         self.assertEqual(stats["raw_pair_rows_in_slice"], 4)
-        self.assertEqual(stats["duplicate_situation_rows_skipped"], 1)
-        self.assertEqual(stats["rows_without_situation_id"], 0)
-
-    def test_select_pairs_keeps_rows_without_situation_id(self):
-        pairs = [
-            {"pair_id": 1, "dataset_position": 1, "situation_id": None},
-            {"pair_id": 2, "dataset_position": 2, "situation_id": None},
-            {"pair_id": 3, "dataset_position": 3, "situation_id": 7},
-        ]
-        selected, stats = select_pairs(pairs, start_position=1, end_position=None, num_pairs=3)
-        self.assertEqual([pair["pair_id"] for pair in selected], [1, 2, 3])
-        self.assertEqual(stats["rows_without_situation_id"], 2)
+        self.assertEqual(stats["exact_duplicate_rows_skipped"], 1)
 
     def test_ensure_output_path_is_safe_blocks_overwrite_without_resume(self):
         with tempfile.TemporaryDirectory() as tmpdir:

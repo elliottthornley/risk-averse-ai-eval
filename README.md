@@ -97,9 +97,10 @@ python evaluate.py \
 
 ## Low-Stakes Data
 
-There is now one shared low-stakes source CSV:
+The current low-stakes source CSVs are:
 
 - [data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv)
+- [data/2026_03_22_low_stakes_training_set_600_situations_with_CoTs_lin_only.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_low_stakes_training_set_600_situations_with_CoTs_lin_only.csv)
 
 If you just run `low_stakes_training` with no `--num_situations`, the default is now `200`.
 
@@ -125,7 +126,7 @@ python evaluate.py \
 - keep only situations where the linear-best label and the CARA-best label disagree
 - in practice, this is the risk-averse vs risk-neutral subset used for training methods like steering vectors and DPO
 
-This is for the low-stakes source data.
+This is for the low-stakes source data. The explicit `low_stakes_training_lin_only` and `low_stakes_validation_lin_only` aliases now point to the dedicated 600-situation lin-only CSV.
 
 Important collaborator guidance:
 

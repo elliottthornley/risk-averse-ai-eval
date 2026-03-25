@@ -70,6 +70,8 @@ python evaluate.py \
   --output low_stakes_lin_only_alias.json
 ```
 
+That alias now uses the dedicated `2026_03_22_low_stakes_training_set_600_situations_with_CoTs_lin_only.csv` file.
+
 ## Steering / ICV
 
 Use the same `evaluate.py` entrypoint, but switch to the `transformers` backend.

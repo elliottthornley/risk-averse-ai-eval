@@ -665,21 +665,20 @@ def select_pairs(
         sliced = [pair for pair in sliced if pair["dataset_position"] <= end_position]
 
     selected: List[Dict[str, Any]] = []
-    seen_situation_ids: Set[int] = set()
-    duplicate_situation_rows_skipped = 0
-    rows_without_situation_id = 0
+    seen_exact_rows: Set[Tuple[str, str, str]] = set()
+    exact_duplicate_rows_skipped = 0
 
     for pair in sliced:
-        situation_id = pair.get("situation_id")
-        if situation_id is None:
-            rows_without_situation_id += 1
-            selected.append(pair)
-        elif situation_id in seen_situation_ids:
-            duplicate_situation_rows_skipped += 1
+        dedupe_key = (
+            str(pair.get("prompt_raw", "")),
+            str(pair.get("accepted_response", "")),
+            str(pair.get("rejected_response", "")),
+        )
+        if dedupe_key in seen_exact_rows:
+            exact_duplicate_rows_skipped += 1
             continue
-        else:
-            seen_situation_ids.add(situation_id)
-            selected.append(pair)
+        seen_exact_rows.add(dedupe_key)
+        selected.append(pair)
 
         if len(selected) >= num_pairs:
             break
@@ -687,8 +686,7 @@ def select_pairs(
     selection_stats = {
         "raw_pair_rows_in_slice": len(sliced),
         "selected_unique_rows": len(selected),
-        "duplicate_situation_rows_skipped": duplicate_situation_rows_skipped,
-        "rows_without_situation_id": rows_without_situation_id,
+        "exact_duplicate_rows_skipped": exact_duplicate_rows_skipped,
     }
     return selected, selection_stats
 
@@ -851,10 +849,9 @@ def save_incremental(
         "csv_path": args.csv_path,
         "save_every": args.save_every,
         "backup_every": args.backup_every,
-        "selection_unit": "unique_situations",
+        "selection_unit": "pair_rows",
         "raw_pair_rows_in_slice": (selection_stats or {}).get("raw_pair_rows_in_slice", target_total),
-        "duplicate_situation_rows_skipped": (selection_stats or {}).get("duplicate_situation_rows_skipped", 0),
-        "rows_without_situation_id": (selection_stats or {}).get("rows_without_situation_id", 0),
+        "exact_duplicate_rows_skipped": (selection_stats or {}).get("exact_duplicate_rows_skipped", 0),
         "selected_pair_ids": target_pair_ids,
         "selected_subset_type_counts": selected_subset_type_counts,
         "selected_probability_format_counts": selected_probability_format_counts,
@@ -931,7 +928,7 @@ def main():
         "--num_pairs",
         type=int,
         default=50,
-        help="Number of unique situations to evaluate (keeps the first pair row for each situation_id)",
+        help="Number of pair rows to evaluate (drops only exact duplicate prompt/chosen/rejected rows)",
     )
     parser.add_argument("--output", type=str, default=None, help="Output JSON path (auto-generated if omitted)")
     parser.add_argument(
@@ -987,20 +984,20 @@ def main():
         "--stop_after",
         type=int,
         default=50,
-        help="Evaluate at most this many NEW unique situations in this invocation (default: 50)",
+        help="Evaluate at most this many NEW pair rows in this invocation (default: 50)",
     )
     parser.add_argument("--resume", action="store_true", help="Resume from existing output JSON if present")
     parser.add_argument(
         "--save_every",
         type=int,
         default=16,
-        help="Write checkpoint every N newly evaluated situations (default: 16, aligned with default batch_size)",
+        help="Write checkpoint every N newly evaluated pair rows (default: 16, aligned with default batch_size)",
     )
     parser.add_argument(
         "--backup_every",
         type=int,
         default=80,
-        help="Write .bak backup every N newly evaluated situations (default: 80, 0 disables backups)",
+        help="Write .bak backup every N newly evaluated pair rows (default: 80, 0 disables backups)",
     )
     parser.add_argument(
         "--torch_dtype",
@@ -1082,7 +1079,7 @@ def main():
         num_pairs=args.num_pairs,
     )
     if not selected_pairs:
-        raise ValueError("No reward-model situations selected after applying dataset slice arguments.")
+        raise ValueError("No reward-model pair rows selected after applying dataset slice arguments.")
 
     for pair in selected_pairs:
         pair["prompt"] = build_eval_prompt(pair["prompt_raw"], args.prompt_suffix)
@@ -1109,20 +1106,15 @@ def main():
     print(f"  Dataset: {args.dataset}")
     print(f"  CSV path: {args.csv_path}")
     print(
-        "  Selected unique situations in slice: "
+        "  Selected pair rows in slice: "
         f"{len(selected_pairs)} (from {selection_stats['raw_pair_rows_in_slice']} pair rows)"
     )
-    if selection_stats["duplicate_situation_rows_skipped"]:
+    if selection_stats["exact_duplicate_rows_skipped"]:
         print(
-            "  Duplicate situation rows skipped: "
-            f"{selection_stats['duplicate_situation_rows_skipped']}"
+            "  Exact duplicate pair rows skipped: "
+            f"{selection_stats['exact_duplicate_rows_skipped']}"
         )
-    if selection_stats["rows_without_situation_id"]:
-        print(
-            "  Rows without situation_id kept as separate evaluations: "
-            f"{selection_stats['rows_without_situation_id']}"
-        )
-    print(f"  Pending situations this invocation: {len(pending_pairs)}")
+    print(f"  Pending pair rows this invocation: {len(pending_pairs)}")
     print(f"  Batch size: {args.batch_size}")
     print(f"  Length-aware batching: {'OFF' if args.disable_length_sort else 'ON'}")
     print(f"  Max input length: {args.max_length}")
@@ -1139,7 +1131,7 @@ def main():
         )
 
     if not pending_pairs:
-        print("No pending reward-model situations left to evaluate in this invocation. Refreshing summary JSON.")
+        print("No pending reward-model pair rows left to evaluate in this invocation. Refreshing summary JSON.")
         save_incremental(
             output_path,
             args,

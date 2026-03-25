@@ -141,8 +141,8 @@ CANONICAL_DATASET_ALIASES = {
 }
 CURRENT_EXTRA_DATASET_ALIASES = {
     "low_stakes_validation": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
-    "low_stakes_training_lin_only": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
-    "low_stakes_validation_lin_only": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
+    "low_stakes_training_lin_only": "data/2026_03_22_low_stakes_training_set_600_situations_with_CoTs_lin_only.csv",
+    "low_stakes_validation_lin_only": "data/2026_03_22_low_stakes_training_set_600_situations_with_CoTs_lin_only.csv",
     "medium_stakes_validation_rebels_only": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
     "high_stakes_test_rebels_only": "data/2026_03_22_high_stakes_test_set_1000_Rebels.csv",
     "astronomical_stakes_deployment_rebels_only": "data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv",

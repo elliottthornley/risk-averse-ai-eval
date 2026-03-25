@@ -144,13 +144,13 @@ CURRENT_EXTRA_DATASET_ALIASES = {
     "low_stakes_training_lin_only": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
     "low_stakes_validation_lin_only": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
     "medium_stakes_validation_rebels_only": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
-    "medium_stakes_validation_steals_only": "data/2026_03_22_medium_stakes_val_set_500_steals.csv",
     "high_stakes_test_rebels_only": "data/2026_03_22_high_stakes_test_set_1000_Rebels.csv",
     "astronomical_stakes_deployment_rebels_only": "data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv",
     "steals_test": "data/2026_03_22_test_set_1000_Steals.csv",
 }
 LEGACY_NONDEFAULT_DATASET_ALIASES = {
     "medium_stakes_validation_rebel_cooperate": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
+    "medium_stakes_validation_steals_only": "data/legacy_nondefault/OLD_2026_03_22_medium_stakes_val_set_500_steals.csv",
     "medium_stakes_validation_unified": "data/legacy_nondefault/2026-03-13_medium_stakes_validation_set_gambles.csv",
     "medium_stakes_validation_combined_rebels_and_steals": "data/legacy_nondefault/2026-03-13_medium_stakes_validation_set_gambles.csv",
     "high_stakes_test_rebel_cooperate": "data/2026_03_22_high_stakes_test_set_1000_Rebels.csv",
@@ -184,7 +184,7 @@ DATASET_ALIASES = {
 DATASET_VARIANT_PATHS = {
     "medium_stakes_validation": {
         "rebels_only": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
-        "steals_only": "data/2026_03_22_medium_stakes_val_set_500_steals.csv",
+        "steals_only": "data/legacy_nondefault/OLD_2026_03_22_medium_stakes_val_set_500_steals.csv",
         "combined": "data/legacy_nondefault/2026-03-13_medium_stakes_validation_set_gambles.csv",
     },
     "high_stakes_test": {
@@ -259,10 +259,10 @@ DATASET_VARIANT_SYNONYMS = {
     "unified": "combined",
 }
 DEFAULT_NUM_SITUATIONS_BY_DATASET = {
-    "low_stakes_training": 1000,
-    "low_stakes_validation": 1000,
-    "low_stakes_training_lin_only": 1000,
-    "low_stakes_validation_lin_only": 1000,
+    "low_stakes_training": 200,
+    "low_stakes_validation": 200,
+    "low_stakes_training_lin_only": 200,
+    "low_stakes_validation_lin_only": 200,
     "medium_stakes_validation": 200,
     "medium_stakes_validation_rebels_only": 200,
     "medium_stakes_validation_steals_only": 500,
@@ -1685,9 +1685,10 @@ def run_single_alpha_eval(
         else:
             print("Resume requested but no prior checkpoint found; starting fresh.")
     elif Path(output_path).exists():
-        print(
-            "WARNING: Output file already exists and will be overwritten. "
-            "Use --resume to continue an existing run."
+        raise FileExistsError(
+            "Output file already exists. To continue the interrupted run, re-run with "
+            f"--resume --output {output_path}. To start fresh, choose a new --output path "
+            "or delete the old output file first."
         )
 
     pending_situations = [sit for sit in situations if sit["situation_id"] not in completed_ids]
@@ -2345,7 +2346,10 @@ def main():
             "Use --start_position/--end_position or --custom_csv if you want a fixed held-out validation split."
         )
 
-    if args.resolved_dataset_variant == "combined" or args.dataset in LEGACY_NONDEFAULT_DATASET_ALIASES:
+    medium_steals_variant_is_legacy = (
+        args.dataset_base_alias == "medium_stakes_validation" and args.resolved_dataset_variant == "steals_only"
+    )
+    if args.resolved_dataset_variant == "combined" or medium_steals_variant_is_legacy or args.dataset in LEGACY_NONDEFAULT_DATASET_ALIASES:
         print(
             "WARNING: You are using a legacy/nondefault dataset path. This is mainly for reproduction of older "
             "combined-runs work, not for the current recommended evaluation setup."

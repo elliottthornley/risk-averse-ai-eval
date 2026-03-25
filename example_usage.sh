@@ -49,7 +49,7 @@ python evaluate.py \
     --model_path "$MODEL_PATH" \
     --base_model "$BASE_MODEL" \
     --dataset low_stakes_training \
-    --num_situations 1000 \
+    --num_situations 200 \
     --output results_low_stakes_training.json
 
 echo ""
@@ -70,7 +70,7 @@ python evaluate.py \
     --base_model "$BASE_MODEL" \
     --dataset low_stakes_training \
     --lin_only \
-    --num_situations 1000 \
+    --num_situations 200 \
     --output results_low_stakes_lin_only.json
 
 echo ""

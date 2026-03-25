@@ -42,7 +42,10 @@ If you run [evaluate.py](/Users/elliottthornley/risk-averse-ai-eval/evaluate.py)
 
 If you do not pass `--num_situations`, Evaluate.py now uses the current recommended dataset-specific default:
 
-- `low_stakes_training`: `1000`
+- `low_stakes_training`: `200`
+- `low_stakes_validation`: `200`
+- `low_stakes_training_lin_only`: `200`
+- `low_stakes_validation_lin_only`: `200`
 - `medium_stakes_validation`: `200`
 - `high_stakes_test`: `1000`
 - `astronomical_stakes_deployment`: `1000`
@@ -98,7 +101,9 @@ There is now one shared low-stakes source CSV:
 
 - [data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv)
 
-Use `low_stakes_training` for the whole file.
+If you just run `low_stakes_training` with no `--num_situations`, the default is now `200`.
+
+If you want the whole file, explicitly pass `--num_situations 1000`.
 
 If you want an in-distribution validation set, take a fixed slice of that same source CSV with `--start_position` and `--end_position`, or create your own held-out CSV and pass `--custom_csv`.
 
@@ -231,14 +236,11 @@ Meaning:
 Current built-in reward-model datasets:
 
 - `reward_model_validation` -> [data/2026_03_22_reward_model_val_set_500_Rebels.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_500_Rebels.csv)
-- `reward_model_validation_steals_only` -> [data/2026_03_22_reward_model_val_set_167_Steals.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_167_Steals.csv)
-- `reward_model_validation_combined_rebels_and_steals` -> [data/2026_03_22_reward_model_val_set_500_Rebels_and_167_Steals.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_500_Rebels_and_167_Steals.csv)
 
 Recommended current path:
 
 - use `reward_model_validation` as the headline reward-model validation set
-- use `reward_model_validation_steals_only` as the separate steals-only analysis
-- only use the combined reward-model alias if you specifically want one combined run plus subgroup metrics
+- treat the steals-only and combined reward-model CSVs as legacy/nondefault
 
 Example headline run:
 
@@ -252,24 +254,12 @@ python evaluate_reward_model.py \
   --output reward_model_eval.json
 ```
 
-Example steals-only run:
-
-```bash
-python evaluate_reward_model.py \
-  --base_model /path/to/reward-model \
-  --dataset reward_model_validation_steals_only \
-  --num_pairs 167 \
-  --stop_after 167 \
-  --batch_size 16 \
-  --output reward_model_steals_eval.json
-```
-
 The current reward-model split is:
 
 - `500` `rebels_only` pairs
 - `167` `steals_only` pairs
 
-Those were derived from the older February 11 held-out preference data by mapping `lin -> rebels_only` and `too_risk -> steals_only`, then capping the current `rebels_only` split at `500` rows and keeping all available `steals_only` rows.
+Those steals-only and combined reward-model files are now kept under [data/legacy_nondefault](/Users/elliottthornley/risk-averse-ai-eval/data/legacy_nondefault) with `OLD_` prefixes.
 
 Reward-model evals are usually much faster than generative evals because they score fixed prompt-response transcripts instead of autoregressively generating long chains of thought.
 
@@ -364,6 +354,11 @@ Defaults:
 - `--save_every 4`
 - `--backup_every 20`
 - `--stop_after` is off by default and is now mainly an advanced smoke-test / chunking flag
+
+Safety behavior:
+
+- if the output JSON already exists and you do not pass `--resume`, `evaluate.py` now errors instead of overwriting it
+- this is intentional, to reduce accidental loss of partial runs and to push collaborators toward `--resume`
 
 Resume example:
 

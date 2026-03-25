@@ -50,16 +50,16 @@ CANONICAL_DATASET_ALIASES = {
 }
 CURRENT_EXTRA_DATASET_ALIASES = {
     "reward_model_validation_rebels_only": "data/2026_03_22_reward_model_val_set_500_Rebels.csv",
-    "reward_model_validation_steals_only": "data/2026_03_22_reward_model_val_set_167_Steals.csv",
-    "reward_model_validation_combined_rebels_and_steals": "data/2026_03_22_reward_model_val_set_500_Rebels_and_167_Steals.csv",
 }
 LEGACY_NONDEFAULT_DATASET_ALIASES = {
+    "reward_model_validation_steals_only": "data/legacy_nondefault/OLD_2026_03_22_reward_model_val_set_167_Steals.csv",
+    "reward_model_validation_combined_rebels_and_steals": "data/legacy_nondefault/OLD_2026_03_22_reward_model_val_set_500_Rebels_and_167_Steals.csv",
     "reward_model_validation_lin": "data/2026_03_22_reward_model_val_set_500_Rebels.csv",
-    "reward_model_validation_too_risk": "data/2026_03_22_reward_model_val_set_167_Steals.csv",
-    "reward_model_validation_raw": "data/legacy_nondefault/2026-02-11_reward_model_validation_pairs_raw.csv",
-    "reward_model_validation_legacy_full": "data/legacy_nondefault/2026-02-11_reward_model_validation_pairs.csv",
-    "reward_model_validation_legacy_lin_full": "data/legacy_nondefault/2026-02-11_reward_model_validation_pairs_lin.csv",
-    "reward_model_validation_legacy_too_risk_full": "data/legacy_nondefault/2026-02-11_reward_model_validation_pairs_too_risk.csv",
+    "reward_model_validation_too_risk": "data/legacy_nondefault/OLD_2026_03_22_reward_model_val_set_167_Steals.csv",
+    "reward_model_validation_raw": "data/legacy_nondefault/OLD_2026-02-11_reward_model_validation_pairs_raw.csv",
+    "reward_model_validation_legacy_full": "data/legacy_nondefault/OLD_2026-02-11_reward_model_validation_pairs.csv",
+    "reward_model_validation_legacy_lin_full": "data/legacy_nondefault/OLD_2026-02-11_reward_model_validation_pairs_lin.csv",
+    "reward_model_validation_legacy_too_risk_full": "data/legacy_nondefault/OLD_2026-02-11_reward_model_validation_pairs_too_risk.csv",
 }
 DATASET_ALIASES = {
     **CANONICAL_DATASET_ALIASES,

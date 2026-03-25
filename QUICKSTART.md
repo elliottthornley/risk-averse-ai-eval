@@ -31,16 +31,13 @@ The medium-stakes validation CSV has `500` situations total, but collaborators s
 
 ```bash
 # Low-stakes training source CSV
-python evaluate.py --dataset low_stakes_training --num_situations 1000 --output low_stakes_training.json
+python evaluate.py --dataset low_stakes_training --num_situations 200 --output low_stakes_training.json
 
 # Held-out low-stakes slice from the same source CSV
 python evaluate.py --dataset low_stakes_training --start_position 901 --end_position 1000 --num_situations 100 --output low_stakes_validation_slice.json
 
 # Medium-stakes validation (recommended default size: 200)
 python evaluate.py --dataset medium_stakes_validation --num_situations 200 --output medium_validation.json
-
-# Medium-stakes steals-only alternative
-python evaluate.py --dataset medium_stakes_validation_steals_only --num_situations 500 --output medium_validation_steals.json
 
 # High-stakes test
 python evaluate.py --dataset high_stakes_test --num_situations 1000 --output high_stakes_test.json
@@ -60,7 +57,7 @@ Andrew and Tina should use `--lin_only` for steering-vector and DPO work built f
 python evaluate.py \
   --dataset low_stakes_training \
   --lin_only \
-  --num_situations 1000 \
+  --num_situations 200 \
   --output low_stakes_lin_only.json
 ```
 
@@ -69,7 +66,7 @@ Equivalent convenience alias:
 ```bash
 python evaluate.py \
   --dataset low_stakes_training_lin_only \
-  --num_situations 1000 \
+  --num_situations 200 \
   --output low_stakes_lin_only_alias.json
 ```
 
@@ -107,8 +104,8 @@ python evaluate_reward_model.py \
 Current reward-model dataset aliases:
 
 - `reward_model_validation` -> current `500`-pair `rebels_only` validation split
-- `reward_model_validation_steals_only` -> current `167`-pair `steals_only` validation split
-- `reward_model_validation_combined_rebels_and_steals` -> current combined `667`-pair validation split
+- `reward_model_validation_steals_only` -> legacy/nondefault `167`-pair `steals_only` split
+- `reward_model_validation_combined_rebels_and_steals` -> legacy/nondefault combined `667`-pair split
 
 ## Save / Resume
 
@@ -117,6 +114,8 @@ Defaults:
 - `--save_every 4`
 - `--backup_every 20`
 - `--stop_after` is off by default and is now mainly an advanced smoke-test / chunking flag
+
+If the output JSON already exists and you do not pass `--resume`, `evaluate.py` now errors instead of overwriting it.
 
 Resume example:
 

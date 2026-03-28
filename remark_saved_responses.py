@@ -12,6 +12,7 @@ from typing import Dict, Iterable, List, Optional
 
 import pandas as pd
 
+from dataset_schema_utils import ensure_option_level_dataframe
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DATASET_ALIASES = {
@@ -379,6 +380,7 @@ def remark_payload(payload: Dict, json_path: Path) -> Dict:
     config = payload.get("evaluation_config", {})
     csv_path = resolve_csv_path(config)
     df = pd.read_csv(csv_path)
+    df = ensure_option_level_dataframe(df)
     selected_situations = build_selected_situations(df, config)
     situation_index = {situation["situation_id"]: situation for situation in selected_situations}
 

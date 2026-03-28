@@ -11,10 +11,14 @@ Creative Commons Attribution 4.0 International License (CC BY 4.0).
 This license applies to data files in the [`data/`](data/) directory, including:
 
 - `2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv`
+- `2026_03_22_low_stakes_training_set_600_situations_with_CoTs_lin_only.csv`
 - `2026_03_22_medium_stakes_val_set_500_Rebels.csv`
 - `2026_03_22_high_stakes_test_set_1000_Rebels.csv`
 - `2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv`
 - `2026_03_22_test_set_1000_Steals.csv`
+- `2026_03_22_reward_model_val_set_500_Rebels.csv`
+- `2026_03_22_reward_model_val_set_167_Steals.csv`
+- `2026_03_22_reward_model_val_set_500_Rebels_and_167_Steals.csv`
 - files under `legacy_nondefault/` (legacy and nondefault comparison sets)
 
 ## Attribution Requirement

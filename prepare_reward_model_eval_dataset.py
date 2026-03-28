@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, List
 
 import pandas as pd
+from cot_csv_utils import format_summary, normalize_cot_newlines_in_dataframe, summarize_cot_dataframe
 
 
 SUBSET_TYPE_MAP = {
@@ -22,6 +23,13 @@ def normalize_reward_df(df: pd.DataFrame) -> pd.DataFrame:
     """Drop empty Excel-style columns and normalize rejected_type strings."""
     keep_cols = [col for col in df.columns if not str(col).startswith("Unnamed:")]
     out = df.loc[:, keep_cols].copy()
+    cot_summary = summarize_cot_dataframe(out)
+    if cot_summary["cells_with_literal_backslash_newlines"] > 0:
+        print(
+            "Normalizing literal backslash-newlines in CoT columns before writing reward-model eval CSVs.\n"
+            f"{format_summary(Path('<input dataframe>'), cot_summary)}"
+        )
+        out, _ = normalize_cot_newlines_in_dataframe(out)
     if "rejected_type" in out.columns:
         out["rejected_type"] = out["rejected_type"].astype(str).str.strip().str.lower()
         out["subset_type"] = out["rejected_type"].map(SUBSET_TYPE_MAP).fillna(out["rejected_type"])

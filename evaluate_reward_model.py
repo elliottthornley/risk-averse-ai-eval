@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
+from cot_csv_utils import format_summary, summarize_cot_dataframe, validate_no_literal_backslash_newlines
 
 try:
     import torch
@@ -1070,6 +1071,13 @@ def main():
 
     df = pd.read_csv(args.csv_path)
     df = df.loc[:, [col for col in df.columns if not str(col).startswith("Unnamed:")]].copy()
+    validate_no_literal_backslash_newlines(df, args.csv_path)
+    cot_summary = summarize_cot_dataframe(df)
+    if cot_summary["cells_with_multiple_think_close"] > 0 or cot_summary["cells_with_extra_text_after_think"] > 0:
+        print(
+            "WARNING: CoT CSV has formatting issues beyond newline escapes.\n"
+            f"{format_summary(Path(args.csv_path), cot_summary)}"
+        )
     validate_dataset_columns(df, args.csv_path)
     all_pairs = build_preference_pairs(df)
     selected_pairs, selection_stats = select_pairs(

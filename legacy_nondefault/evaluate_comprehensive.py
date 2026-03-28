@@ -29,6 +29,7 @@ REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+from dataset_schema_utils import ensure_option_level_dataframe
 from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
 
 # === DATASETS ===
@@ -235,6 +236,7 @@ def extract_choice_permissive(response, num_options):
 def load_dataset(dataset_path, num_situations=None):
     dataset_path = resolve_path(dataset_path)
     df = pd.read_csv(dataset_path)
+    df = ensure_option_level_dataframe(df)
     validate_dataset_columns(df, dataset_path)
     situations = []
     unique_ids = df["situation_id"].unique()

@@ -97,7 +97,7 @@ python evaluate.py \
 
 ## Low-Stakes Data
 
-The current low-stakes source CSVs are:
+There is now one shared low-stakes source CSV for the full March 22 training set:
 
 - [data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv)
 - [data/2026_03_22_low_stakes_training_set_600_situations_with_CoTs_lin_only.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_low_stakes_training_set_600_situations_with_CoTs_lin_only.csv)
@@ -105,6 +105,10 @@ The current low-stakes source CSVs are:
 If you just run `low_stakes_training` with no `--num_situations`, the default is now `200`.
 
 If you want the whole file, explicitly pass `--num_situations 1000`.
+
+The evaluator will expand that one-row-per-situation CSV internally when it needs per-option metadata, so there is no separate `one_row_per_option` file in the repo.
+
+Use `low_stakes_training` for the whole file.
 
 If you want an in-distribution validation set, take a fixed slice of that same source CSV with `--start_position` and `--end_position`, or create your own held-out CSV and pass `--custom_csv`.
 
@@ -151,6 +155,24 @@ python evaluate.py \
   --num_situations 1000 \
   --output low_stakes_lin_only_alias.json
 ```
+
+## CoT CSV Hygiene
+
+Any CSV with `chosen_full` / `rejected_full` must use real newline characters inside those fields, not literal backslash-`n`.
+
+Before using newly received CoT CSVs, especially new Ben Maltbie reward-model test sets, run:
+
+```bash
+python cot_csv_utils.py path/to/file.csv
+```
+
+If the validator reports literal backslash-newlines, fix them before use:
+
+```bash
+python cot_csv_utils.py --fix-newlines-in-place path/to/file.csv
+```
+
+[evaluate_reward_model.py](/Users/elliottthornley/risk-averse-ai-eval/evaluate_reward_model.py) now fails fast on this mismatch so dirty CoT CSVs are harder to use accidentally.
 
 ## Prompting Setup
 

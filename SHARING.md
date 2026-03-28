@@ -30,6 +30,7 @@ Deprecated / legacy:
 ## Current Active CSVs
 
 - [data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv)
+- [data/2026_03_22_low_stakes_training_set_600_situations_with_CoTs_lin_only.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_low_stakes_training_set_600_situations_with_CoTs_lin_only.csv)
 - [data/2026_03_22_medium_stakes_val_set_500_Rebels.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_medium_stakes_val_set_500_Rebels.csv)
 - [data/2026_03_22_high_stakes_test_set_1000_Rebels.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_high_stakes_test_set_1000_Rebels.csv)
 - [data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv)
@@ -67,3 +68,4 @@ python evaluate_reward_model.py \
 - Do not casually use `--no_save_responses`.
 - For steering-vector and DPO work on the low-stakes source data, use `--lin_only`.
 - For medium-stakes validation, collaborators should usually report results on `200` situations, not all `500`.
+- Before using new CoT CSVs from Ben or anyone else, run `python cot_csv_utils.py path/to/file.csv`.

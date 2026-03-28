@@ -23,6 +23,7 @@ import pandas as pd
 import torch
 
 from answer_parser import apply_finish_reason_safeguard, extract_choice_with_strategy, infer_option_label_style
+from dataset_schema_utils import ensure_option_level_dataframe
 from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
 
 try:
@@ -2443,6 +2444,7 @@ def main():
 
     print("Loading validation data...")
     df = pd.read_csv(args.csv_path)
+    df = ensure_option_level_dataframe(df)
     validate_dataset_columns(df, args.csv_path)
     print(f"Dataset alias: {args.dataset}")
     print(f"Dataset base alias: {args.dataset_base_alias}")

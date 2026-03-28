@@ -47,10 +47,11 @@ gc.collect()
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CANONICAL_DATASET_ALIASES = {
-    "reward_model_validation": "data/2026_03_22_reward_model_val_set_500_Rebels.csv",
+    "reward_model_validation": "data/2026_03_22_reward_model_val_set_357_Rebels_clean.csv",
 }
 CURRENT_EXTRA_DATASET_ALIASES = {
-    "reward_model_validation_rebels_only": "data/2026_03_22_reward_model_val_set_500_Rebels.csv",
+    "reward_model_validation_rebels_only": "data/2026_03_22_reward_model_val_set_357_Rebels_clean.csv",
+    "reward_model_validation_raw_rebels_500": "data/2026_03_22_reward_model_val_set_500_Rebels.csv",
 }
 LEGACY_NONDEFAULT_DATASET_ALIASES = {
     "reward_model_validation_steals_only": "data/legacy_nondefault/OLD_2026_03_22_reward_model_val_set_167_Steals.csv",
@@ -1077,6 +1078,13 @@ def main():
         print(
             "WARNING: CoT CSV has formatting issues beyond newline escapes.\n"
             f"{format_summary(Path(args.csv_path), cot_summary)}"
+        )
+    if cot_summary["rows_with_prompt_meta_references"] > 0:
+        print(
+            "WARNING: CoT CSV contains prompt-meta / instruction-referential reasoning.\n"
+            f"{format_summary(Path(args.csv_path), cot_summary)}\n"
+            "Audit and filter it with: "
+            f"python audit_reward_model_csv.py \"{args.csv_path}\""
         )
     validate_dataset_columns(df, args.csv_path)
     all_pairs = build_preference_pairs(df)

@@ -41,6 +41,19 @@ class CotCsvUtilsTests(unittest.TestCase):
         self.assertEqual(summary["rows_with_literal_backslash_newlines"], 1)
         self.assertEqual(summary["cells_with_extra_text_after_think"], 1)
 
+    def test_summarize_cot_dataframe_reports_prompt_meta_references(self):
+        df = pd.DataFrame(
+            {
+                "chosen_full": ['<think>The prompt says option 1 is correct.</think>\n\n{"answer":"1"}'],
+                "rejected_full": ['<think>Clean.</think>\n\n{"answer":"2"}'],
+            }
+        )
+
+        summary = summarize_cot_dataframe(df)
+
+        self.assertEqual(summary["cells_with_prompt_meta_references"], 1)
+        self.assertEqual(summary["rows_with_prompt_meta_references"], 1)
+
     def test_validate_no_literal_backslash_newlines_raises_with_fix_command(self):
         df = pd.DataFrame(
             {

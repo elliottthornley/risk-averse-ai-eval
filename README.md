@@ -174,6 +174,12 @@ python cot_csv_utils.py --fix-newlines-in-place path/to/file.csv
 
 [evaluate_reward_model.py](/Users/elliottthornley/risk-averse-ai-eval/evaluate_reward_model.py) now fails fast on this mismatch so dirty CoT CSVs are harder to use accidentally.
 
+For reward-model CoT CSVs, also audit prompt-meta references and chosen-label consistency against the prompt itself:
+
+```bash
+python audit_reward_model_csv.py path/to/reward_model.csv
+```
+
 ## Prompting Setup
 
 Each eval request is:
@@ -258,11 +264,13 @@ Meaning:
 
 Current built-in reward-model datasets:
 
-- `reward_model_validation` -> [data/2026_03_22_reward_model_val_set_500_Rebels.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_500_Rebels.csv)
+- `reward_model_validation` -> [data/2026_03_22_reward_model_val_set_357_Rebels_clean.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_357_Rebels_clean.csv)
+- `reward_model_validation_raw_rebels_500` -> [data/2026_03_22_reward_model_val_set_500_Rebels.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_500_Rebels.csv)
 
 Recommended current path:
 
 - use `reward_model_validation` as the headline reward-model validation set
+- treat `reward_model_validation_raw_rebels_500` as an audited source file, not the default eval target
 - treat the steals-only and combined reward-model CSVs as legacy/nondefault
 
 Example headline run:
@@ -279,7 +287,8 @@ python evaluate_reward_model.py \
 
 The current reward-model split is:
 
-- `500` `rebels_only` pairs
+- `357` clean audited `rebels_only` pairs in the canonical validation alias
+- `500` raw `rebels_only` pairs kept as the source CSV
 - `167` `steals_only` pairs
 
 Those steals-only and combined reward-model files are now kept under [data/legacy_nondefault](/Users/elliottthornley/risk-averse-ai-eval/data/legacy_nondefault) with `OLD_` prefixes.

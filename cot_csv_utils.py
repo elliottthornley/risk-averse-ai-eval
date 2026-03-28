@@ -5,12 +5,27 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import re
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 
 
 COT_TEXT_COLUMNS = ("chosen_full", "rejected_full")
+PROMPT_META_REFERENCE_PATTERNS = (
+    r"\binstruction(?:s)?\b",
+    r"\bas instructed\b",
+    r"\bthe problem states\b",
+    r"\bthe prompt says\b",
+    r"\bprompt says\b",
+    r"\bfollowing the instruction\b",
+    r"\bfollowing my instructions\b",
+    r"\bgiven the instruction\b",
+    r"\binstructed that\b",
+    r"\bproblem statement\b",
+    r"\bcorrect answer\b",
+)
+PROMPT_META_REFERENCE_RE = re.compile("|".join(PROMPT_META_REFERENCE_PATTERNS), re.IGNORECASE)
 
 
 def find_cot_text_columns(df: pd.DataFrame) -> List[str]:
@@ -38,12 +53,15 @@ def summarize_cot_dataframe(df: pd.DataFrame) -> Dict[str, Any]:
         "cells_missing_think_close": 0,
         "cells_with_multiple_think_close": 0,
         "cells_with_extra_text_after_think": 0,
+        "cells_with_prompt_meta_references": 0,
+        "rows_with_prompt_meta_references": 0,
     }
     if not cot_columns:
         return summary
 
     for _, row in df.iterrows():
         row_has_literal_backslash_newlines = False
+        row_has_prompt_meta_references = False
         for col in cot_columns:
             text = row.get(col)
             if not isinstance(text, str):
@@ -68,9 +86,14 @@ def summarize_cot_dataframe(df: pd.DataFrame) -> Dict[str, Any]:
                 trailing_text = analysis_text.split("</think>", 1)[1].strip()
                 if trailing_text and not trailing_text.startswith('{"answer"'):
                     summary["cells_with_extra_text_after_think"] += 1
+            if PROMPT_META_REFERENCE_RE.search(analysis_text):
+                summary["cells_with_prompt_meta_references"] += 1
+                row_has_prompt_meta_references = True
 
         if row_has_literal_backslash_newlines:
             summary["rows_with_literal_backslash_newlines"] += 1
+        if row_has_prompt_meta_references:
+            summary["rows_with_prompt_meta_references"] += 1
     return summary
 
 
@@ -120,7 +143,9 @@ def format_summary(path: Path, summary: Dict[str, Any]) -> str:
         f"  cells missing <think>: {summary['cells_missing_think_open']}\n"
         f"  cells missing </think>: {summary['cells_missing_think_close']}\n"
         f"  cells with multiple </think>: {summary['cells_with_multiple_think_close']}\n"
-        f"  cells with extra text after </think>: {summary['cells_with_extra_text_after_think']}"
+        f"  cells with extra text after </think>: {summary['cells_with_extra_text_after_think']}\n"
+        f"  cells with prompt-meta references: {summary['cells_with_prompt_meta_references']}\n"
+        f"  rows with prompt-meta references: {summary['rows_with_prompt_meta_references']}"
     )
 
 

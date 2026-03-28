@@ -134,6 +134,7 @@ sys.stdout.reconfigure(line_buffering=True)
 gc.collect()
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_EVAL_TEMPERATURE = 0.6
 CANONICAL_DATASET_ALIASES = {
     "low_stakes_training": "data/2026_03_22_low_stakes_training_set_1000_situations_with_CoTs.csv",
     "medium_stakes_validation": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
@@ -1578,6 +1579,11 @@ def run_single_alpha_eval(
     print(f"Evaluating on {len(situations)} situations with PERMISSIVE parser...")
     print(f"Backend: {backend}")
     print(f"Temperature: {args.temperature} ({'deterministic' if args.temperature == 0 else 'sampling'})")
+    if abs(args.temperature - DEFAULT_EVAL_TEMPERATURE) > 1e-12:
+        print(
+            f"WARNING: Non-default temperature in use ({args.temperature}). "
+            f"The canonical paper default is {DEFAULT_EVAL_TEMPERATURE}."
+        )
     print(f"Steering alpha: {steering_alpha:+.4f}")
     print(f"Steering apply mode: {args.steering_apply_mode}")
     print(f"Top-p: {args.top_p}")
@@ -2079,8 +2085,16 @@ def main():
     parser.add_argument(
         "--temperature",
         type=float,
-        default=0.6,
-        help="Sampling temperature (default: 0.6)",
+        default=DEFAULT_EVAL_TEMPERATURE,
+        help=f"Sampling temperature (default: {DEFAULT_EVAL_TEMPERATURE})",
+    )
+    parser.add_argument(
+        "--allow_nondefault_temperature",
+        action="store_true",
+        help=(
+            "Advanced: required for any --temperature other than the canonical paper default "
+            f"of {DEFAULT_EVAL_TEMPERATURE}. This prevents accidental off-default eval runs."
+        ),
     )
     parser.add_argument(
         "--top_p",
@@ -2375,6 +2389,14 @@ def main():
         raise ValueError("--stop_after must be >= 1")
     if args.batch_size < 1:
         raise ValueError("--batch_size must be >= 1")
+    if args.temperature < 0:
+        raise ValueError("--temperature must be >= 0")
+    if abs(args.temperature - DEFAULT_EVAL_TEMPERATURE) > 1e-12 and not args.allow_nondefault_temperature:
+        raise ValueError(
+            "Non-default --temperature requested "
+            f"({args.temperature}). The canonical paper eval default is {DEFAULT_EVAL_TEMPERATURE}. "
+            "If you really intend to run off-default, re-run with --allow_nondefault_temperature."
+        )
     if not (0 < args.top_p <= 1):
         raise ValueError("--top_p must be in (0, 1]")
     if args.top_k < 0:

@@ -264,13 +264,15 @@ Meaning:
 
 Current built-in reward-model datasets:
 
-- `reward_model_validation` -> [data/2026_03_22_reward_model_val_set_357_Rebels_clean.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_357_Rebels_clean.csv)
+- `reward_model_validation` -> [data/2026_03_22_reward_model_val_set_415_Rebels_clean.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_415_Rebels_clean.csv)
+- `reward_model_validation_parser_conservative_357` -> [data/2026_03_22_reward_model_val_set_357_Rebels_clean.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_357_Rebels_clean.csv)
 - `reward_model_validation_raw_rebels_500` -> [data/2026_03_22_reward_model_val_set_500_Rebels.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_500_Rebels.csv)
 
 Recommended current path:
 
 - use `reward_model_validation` as the headline reward-model validation set
 - treat `reward_model_validation_raw_rebels_500` as an audited source file, not the default eval target
+- treat `reward_model_validation_parser_conservative_357` as an older parser-conservative clean split kept only for reproduction
 - treat the steals-only and combined reward-model CSVs as legacy/nondefault
 
 Example headline run:
@@ -287,7 +289,8 @@ python evaluate_reward_model.py \
 
 The current reward-model split is:
 
-- `357` clean audited `rebels_only` pairs in the canonical validation alias
+- `415` clean audited `rebels_only` situations in the canonical validation alias
+- `357` older parser-conservative clean `rebels_only` situations kept for reproduction
 - `500` raw `rebels_only` pairs kept as the source CSV
 - `167` `steals_only` pairs
 

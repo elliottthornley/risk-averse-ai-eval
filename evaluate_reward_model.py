@@ -47,10 +47,11 @@ gc.collect()
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CANONICAL_DATASET_ALIASES = {
-    "reward_model_validation": "data/2026_03_22_reward_model_val_set_357_Rebels_clean.csv",
+    "reward_model_validation": "data/2026_03_22_reward_model_val_set_415_Rebels_clean.csv",
 }
 CURRENT_EXTRA_DATASET_ALIASES = {
-    "reward_model_validation_rebels_only": "data/2026_03_22_reward_model_val_set_357_Rebels_clean.csv",
+    "reward_model_validation_rebels_only": "data/2026_03_22_reward_model_val_set_415_Rebels_clean.csv",
+    "reward_model_validation_parser_conservative_357": "data/2026_03_22_reward_model_val_set_357_Rebels_clean.csv",
     "reward_model_validation_raw_rebels_500": "data/2026_03_22_reward_model_val_set_500_Rebels.csv",
 }
 LEGACY_NONDEFAULT_DATASET_ALIASES = {

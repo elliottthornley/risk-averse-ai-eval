@@ -47,17 +47,14 @@ gc.collect()
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CANONICAL_DATASET_ALIASES = {
-    "reward_model_validation": "data/2026_03_22_reward_model_val_set_415_Rebels_clean.csv",
+    "reward_model_validation": "data/2026_03_22_reward_model_val_set_400_Rebels_clean.csv",
 }
 CURRENT_EXTRA_DATASET_ALIASES = {
-    "reward_model_validation_rebels_only": "data/2026_03_22_reward_model_val_set_415_Rebels_clean.csv",
-    "reward_model_validation_parser_conservative_357": "data/2026_03_22_reward_model_val_set_357_Rebels_clean.csv",
-    "reward_model_validation_raw_rebels_500": "data/2026_03_22_reward_model_val_set_500_Rebels.csv",
+    "reward_model_validation_rebels_only": "data/2026_03_22_reward_model_val_set_400_Rebels_clean.csv",
 }
 LEGACY_NONDEFAULT_DATASET_ALIASES = {
     "reward_model_validation_steals_only": "data/legacy_nondefault/OLD_2026_03_22_reward_model_val_set_167_Steals.csv",
     "reward_model_validation_combined_rebels_and_steals": "data/legacy_nondefault/OLD_2026_03_22_reward_model_val_set_500_Rebels_and_167_Steals.csv",
-    "reward_model_validation_lin": "data/2026_03_22_reward_model_val_set_500_Rebels.csv",
     "reward_model_validation_too_risk": "data/legacy_nondefault/OLD_2026_03_22_reward_model_val_set_167_Steals.csv",
     "reward_model_validation_raw": "data/legacy_nondefault/OLD_2026-02-11_reward_model_validation_pairs_raw.csv",
     "reward_model_validation_legacy_full": "data/legacy_nondefault/OLD_2026-02-11_reward_model_validation_pairs.csv",

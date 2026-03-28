@@ -1,6 +1,6 @@
 {
-  "source_csv": "/Users/elliottthornley/My Drive/Academics/Papers in Progress/Risk-Averse AIs/SERC - Risk-averse AIs/codex-risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_500_Rebels.csv",
-  "clean_csv": "/Users/elliottthornley/My Drive/Academics/Papers in Progress/Risk-Averse AIs/SERC - Risk-averse AIs/codex-risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_415_Rebels_clean.csv",
+  "source_csv": "/Users/elliottthornley/My Drive/Academics/Papers in Progress/Risk-Averse AIs/SERC - Risk-averse AIs/2026_03_22_reward_model_val_set_500_Rebels.csv",
+  "clean_csv": null,
   "num_rows": 500,
   "num_prompt_meta_reference_rows": 39,
   "num_parse_failure_rows": 0,
@@ -9,9 +9,9 @@
   "num_rejected_response_mismatch_rows": 0,
   "num_excluded_rows": 82,
   "num_kept_rows": 416,
-  "num_kept_rows_written": 415,
-  "num_kept_unique_situations": 415,
-  "deduped_by_situation_id": true,
+  "num_kept_rows_written": null,
+  "num_kept_unique_situations": null,
+  "deduped_by_situation_id": false,
   "prompt_meta_reference_rows": [
     "3",
     "12",

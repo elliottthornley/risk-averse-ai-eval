@@ -476,6 +476,21 @@ def parse_literal_list(value):
     return []
 
 
+def infer_label_style_from_allowed_labels(value) -> Optional[str]:
+    """Infer answer label style directly from the stored allowed_labels column."""
+    labels = parse_string_list(value)
+    if not labels:
+        return None
+    first = str(labels[0]).strip()
+    if not first:
+        return None
+    if first.isalpha():
+        return "letters"
+    if first.isdigit():
+        return "numbers"
+    return None
+
+
 def compute_expected_value_from_row(row: pd.Series) -> Optional[float]:
     """Compute exact EV from prizes_display and probs_percent when available."""
     if "prizes_display" not in row or "probs_percent" not in row:
@@ -1445,7 +1460,12 @@ def build_situations(df: pd.DataFrame, num_situations: Optional[int]):
                 "option_types_besides_cooperate": option_types_besides_cooperate,
                 "prompt_raw": prompt_raw,
                 "num_options": num_options,
-                "answer_label_style": infer_option_label_style(prompt_raw, num_options),
+                "answer_label_style": (
+                    infer_option_label_style(prompt_raw, num_options)
+                    or infer_label_style_from_allowed_labels(
+                        sit_data["allowed_labels"].iloc[0] if "allowed_labels" in df.columns else None
+                    )
+                ),
                 "options": options,
                 "probability_format": probability_format_from_value(use_verbal_probs, prompt_raw),
                 "bucket_label": bucket_label,

@@ -219,11 +219,18 @@ def build_selected_situations(df: pd.DataFrame, config: Dict) -> List[Dict]:
             option_number = option_index + 1
             option_key_letter = chr(ord("a") + option_index)
             option_key_number = str(option_number)
+            eu_linear_val = None
+            if "EU_linear_display_3sf" in row.index:
+                try:
+                    eu_linear_val = float(row["EU_linear_display_3sf"])
+                except (TypeError, ValueError):
+                    pass
             option_data = {
                 "type": row["option_type"],
                 "is_best_cara": option_number in cara_best_option_numbers,
                 "is_best_linear": option_number in linear_best_option_numbers if linear_best_option_numbers else None,
                 "option_index": option_index,
+                "eu_linear": eu_linear_val,
             }
             options[option_key_letter] = option_data
             options[option_key_number] = option_data
@@ -242,6 +249,21 @@ def build_selected_situations(df: pd.DataFrame, config: Dict) -> List[Dict]:
     return situations
 
 
+def _collect_eu_linear_values(options: Dict) -> List[float]:
+    """Extract unique eu_linear values from an options dict (keyed by letter and number)."""
+    seen_indices = set()
+    vals = []
+    for opt in options.values():
+        idx = opt.get("option_index")
+        if idx in seen_indices:
+            continue
+        seen_indices.add(idx)
+        eu = opt.get("eu_linear")
+        if eu is not None:
+            vals.append(eu)
+    return vals
+
+
 def summarize_results(results: List[Dict]) -> Dict[str, float]:
     valid = [row for row in results if row.get("option_type") is not None]
     if valid:
@@ -258,6 +280,13 @@ def summarize_results(results: List[Dict]) -> Dict[str, float]:
     else:
         cooperate_rate = rebel_rate = steal_rate = cara_rate = linear_rate = 0.0
 
+    # EV metrics: highest EV rate, lowest EV rate, average fraction of max EV.
+    ev_valid = [r for r in valid if r.get("eu_linear") is not None] if valid else []
+    highest_ev_rate = sum(r.get("is_best_linear", False) for r in ev_valid) / len(ev_valid) if ev_valid else None
+    lowest_ev_rate = sum(r.get("is_lowest_ev", False) for r in ev_valid) / len(ev_valid) if ev_valid else None
+    fraction_vals = [r["ev_fraction"] for r in ev_valid if r.get("ev_fraction") is not None]
+    avg_ev_fraction = sum(fraction_vals) / len(fraction_vals) if fraction_vals else None
+
     parse_rate = len(valid) / len(results) if results else 0.0
     return {
         "parse_rate": parse_rate,
@@ -266,6 +295,9 @@ def summarize_results(results: List[Dict]) -> Dict[str, float]:
         "steal_rate": steal_rate,
         "best_cara_rate": cara_rate,
         "best_linear_rate": linear_rate,
+        "highest_ev_rate": highest_ev_rate,
+        "lowest_ev_rate": lowest_ev_rate,
+        "avg_ev_fraction": avg_ev_fraction,
     }
 
 
@@ -364,10 +396,23 @@ def apply_labels_to_row(row: Dict, situation_index: Dict[int, Dict]) -> bool:
 
     choice = normalize_choice(row.get("choice"))
     chosen = situation["options"].get(choice) if choice else None
+    # Compute EV metrics if eu_linear data is available.
+    chosen_eu = chosen.get("eu_linear") if chosen else None
+    all_eu_vals = _collect_eu_linear_values(situation["options"]) if chosen else []
+    is_lowest_ev = None
+    ev_fraction = None
+    if chosen_eu is not None and all_eu_vals:
+        max_ev = max(all_eu_vals)
+        min_ev = min(all_eu_vals)
+        is_lowest_ev = abs(chosen_eu - min_ev) < 1e-12
+        ev_fraction = chosen_eu / max_ev if max_ev > 0 else (1.0 if max_ev == 0 and chosen_eu == 0 else None)
     new_values = {
         "option_type": chosen["type"] if chosen else None,
         "is_best_cara": chosen["is_best_cara"] if chosen else None,
         "is_best_linear": chosen["is_best_linear"] if chosen else None,
+        "eu_linear": chosen_eu,
+        "is_lowest_ev": is_lowest_ev,
+        "ev_fraction": ev_fraction,
     }
     for field_name, new_value in new_values.items():
         if row.get(field_name) != new_value:

@@ -478,7 +478,7 @@ def parse_literal_list(value):
 
 def infer_label_style_from_allowed_labels(value) -> Optional[str]:
     """Infer answer label style directly from the stored allowed_labels column."""
-    labels = parse_string_list(value)
+    labels = parse_label_list(value)
     if not labels:
         return None
     first = str(labels[0]).strip()

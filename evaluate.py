@@ -7,6 +7,7 @@ Optional steering controls allow ICV direction construction/injection and alpha 
 """
 
 import argparse
+import ast
 import gc
 import json
 import os
@@ -149,6 +150,9 @@ CURRENT_EXTRA_DATASET_ALIASES = {
     "high_stakes_test_rebels_only": "data/2026_03_22_high_stakes_test_set_1000_Rebels.csv",
     "astronomical_stakes_deployment_rebels_only": "data/2026_03_22_astronomical_stakes_deployment_set_1000_Rebels.csv",
     "steals_test": "data/2026_03_22_test_set_1000_Steals.csv",
+    "gpu_hours_transfer_benchmark": "data/transfer_to_other_quantities/2026_04_11_gpu_hours_transfer_benchmark_interleaved_1000_situations.csv",
+    "lives_saved_transfer_benchmark": "data/transfer_to_other_quantities/2026_04_11_lives_saved_transfer_benchmark_interleaved_1000_situations.csv",
+    "money_for_user_transfer_benchmark": "data/transfer_to_other_quantities/2026_04_11_money_for_user_transfer_benchmark_interleaved_1000_situations.csv",
 }
 LEGACY_NONDEFAULT_DATASET_ALIASES = {
     "medium_stakes_validation_rebel_cooperate": "data/2026_03_22_medium_stakes_val_set_500_Rebels.csv",
@@ -222,6 +226,9 @@ DATASET_ALIAS_BASE_NAMES = {
     "astronomical_stakes_deployment_combined": "astronomical_stakes_deployment",
     "astronomical_stakes_deployment_unified": "astronomical_stakes_deployment",
     "steals_test": "steals_test",
+    "gpu_hours_transfer_benchmark": "gpu_hours_transfer_benchmark",
+    "lives_saved_transfer_benchmark": "lives_saved_transfer_benchmark",
+    "money_for_user_transfer_benchmark": "money_for_user_transfer_benchmark",
 }
 DATASET_ALIAS_VARIANTS = {
     "medium_stakes_validation": "rebels_only",
@@ -245,6 +252,9 @@ DATASET_ALIAS_VARIANTS = {
     "astronomical_stakes_deployment_combined": "combined",
     "astronomical_stakes_deployment_unified": "combined",
     "steals_test": "steals_only",
+    "gpu_hours_transfer_benchmark": "default",
+    "lives_saved_transfer_benchmark": "default",
+    "money_for_user_transfer_benchmark": "default",
 }
 DATASET_VARIANT_SYNONYMS = {
     "default": "default",
@@ -273,6 +283,9 @@ DEFAULT_NUM_SITUATIONS_BY_DATASET = {
     "astronomical_stakes_deployment": 1000,
     "astronomical_stakes_deployment_rebels_only": 1000,
     "steals_test": 1000,
+    "gpu_hours_transfer_benchmark": 1000,
+    "lives_saved_transfer_benchmark": 1000,
+    "money_for_user_transfer_benchmark": 1000,
 }
 REQUIRED_COLUMNS = {"situation_id", "prompt_text", "option_index", "option_type"}
 CARA_COLUMNS = {"is_best_cara_display", "CARA_correct_labels", "CARA_alpha_0_01_best_labels"}
@@ -282,6 +295,12 @@ PREFERRED_LINEAR_LABEL_COLUMNS = ("linear_correct_labels", "linear_best_labels")
 LIN_ONLY_BUCKET_LABELS = {"lin_only", "linear_only"}
 SUBSET_TYPES = ("rebels_only", "steals_only")
 PROBABILITY_FORMATS = ("numerical", "verbal")
+SOURCE_STAKES = (
+    "low_stakes_training",
+    "medium_stakes_validation",
+    "high_stakes_test",
+    "astronomical_stakes_deployment",
+)
 
 
 def resolve_path(path):
@@ -433,6 +452,48 @@ def parse_label_list(value):
         return [s]
 
 
+def parse_literal_list(value):
+    """Parse a Python/JSON-style list cell such as '[1, 2]'."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return []
+    if isinstance(value, list):
+        return value
+    text = str(value).strip()
+    if not text:
+        return []
+    try:
+        parsed = ast.literal_eval(text)
+        if isinstance(parsed, list):
+            return parsed
+    except Exception:
+        pass
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return parsed
+    except Exception:
+        pass
+    return []
+
+
+def compute_expected_value_from_row(row: pd.Series) -> Optional[float]:
+    """Compute exact EV from prizes_display and probs_percent when available."""
+    if "prizes_display" not in row or "probs_percent" not in row:
+        return None
+    prizes = parse_literal_list(row.get("prizes_display"))
+    probs_percent = parse_literal_list(row.get("probs_percent"))
+    if not prizes or not probs_percent or len(prizes) != len(probs_percent):
+        return None
+    try:
+        probs = [float(p) / 100.0 for p in probs_percent]
+        prob_sum = sum(probs)
+        if prob_sum > 0 and abs(prob_sum - 1.0) > 1e-9:
+            probs = [p / prob_sum for p in probs]
+        return float(sum(float(prize) * prob for prize, prob in zip(prizes, probs)))
+    except Exception:
+        return None
+
+
 def parse_bool_like(value):
     """Parse bool-ish CSV values robustly (handles numpy/pandas/string forms)."""
     if value is None or (isinstance(value, float) and pd.isna(value)):
@@ -501,6 +562,8 @@ def extract_situation_manifest_entry(situation: Dict) -> Dict:
         "situation_id": situation["situation_id"],
         "dataset_position": situation.get("dataset_position"),
         "subset_type": situation.get("subset_type"),
+        "source_stakes": situation.get("source_stakes"),
+        "source_condition": situation.get("source_condition"),
         "option_types_besides_cooperate": situation.get("option_types_besides_cooperate"),
         "num_options": situation.get("num_options"),
         "probability_format": situation.get("probability_format"),
@@ -807,21 +870,6 @@ def load_vllm_engine(args):
     return engine, lora_request
 
 
-def _collect_eu_linear_values(options: Dict) -> List[float]:
-    """Extract unique eu_linear values from an options dict (keyed by letter and number)."""
-    seen_indices = set()
-    vals = []
-    for opt in options.values():
-        idx = opt.get("option_index")
-        if idx in seen_indices:
-            continue
-        seen_indices.add(idx)
-        eu = opt.get("eu_linear")
-        if eu is not None:
-            vals.append(eu)
-    return vals
-
-
 def summarize_results(results):
     """Compute aggregate metrics from per-situation result records."""
     valid = [r for r in results if r["option_type"] is not None]
@@ -832,15 +880,37 @@ def summarize_results(results):
         cara_rate = sum(r["is_best_cara"] for r in valid) / len(valid)
         linear_valid = [r for r in valid if r.get("is_best_linear") is not None]
         linear_rate = sum(r["is_best_linear"] for r in linear_valid) / len(linear_valid) if linear_valid else 0
+        ev_valid = [r for r in valid if r.get("is_best_expected_value") is not None]
+        ev_ratio_valid = [r for r in ev_valid if r.get("expected_value_fraction_of_best") is not None]
+        ev_relative_valid = [r for r in ev_valid if r.get("expected_value_relative_to_range") is not None]
+        ev_regret_valid = [r for r in ev_valid if r.get("expected_value_regret") is not None]
+        best_ev_rate = (
+            sum(r["is_best_expected_value"] for r in ev_valid) / len(ev_valid) if ev_valid else 0
+        )
+        worst_ev_rate = (
+            sum(r["is_worst_expected_value"] for r in ev_valid) / len(ev_valid) if ev_valid else 0
+        )
+        avg_ev_fraction_of_best = (
+            sum(float(r["expected_value_fraction_of_best"]) for r in ev_ratio_valid) / len(ev_ratio_valid)
+            if ev_ratio_valid
+            else None
+        )
+        avg_ev_relative_to_range = (
+            sum(float(r["expected_value_relative_to_range"]) for r in ev_relative_valid) / len(ev_relative_valid)
+            if ev_relative_valid
+            else None
+        )
+        avg_ev_regret = (
+            sum(float(r["expected_value_regret"]) for r in ev_regret_valid) / len(ev_regret_valid)
+            if ev_regret_valid
+            else None
+        )
     else:
         cooperate_rate = rebel_rate = steal_rate = cara_rate = linear_rate = 0
-
-    # EV metrics: highest EV rate, lowest EV rate, average fraction of max EV.
-    ev_valid = [r for r in valid if r.get("eu_linear") is not None]
-    highest_ev_rate = sum(r.get("is_best_linear", False) for r in ev_valid) / len(ev_valid) if ev_valid else None
-    lowest_ev_rate = sum(r.get("is_lowest_ev", False) for r in ev_valid) / len(ev_valid) if ev_valid else None
-    fraction_vals = [r["ev_fraction"] for r in ev_valid if r.get("ev_fraction") is not None]
-    avg_ev_fraction = sum(fraction_vals) / len(fraction_vals) if fraction_vals else None
+        best_ev_rate = worst_ev_rate = 0
+        avg_ev_fraction_of_best = None
+        avg_ev_relative_to_range = None
+        avg_ev_regret = None
 
     parse_rate = len(valid) / len(results) if results else 0
     return {
@@ -850,9 +920,15 @@ def summarize_results(results):
         "steal_rate": steal_rate,
         "best_cara_rate": cara_rate,
         "best_linear_rate": linear_rate,
-        "highest_ev_rate": highest_ev_rate,
-        "lowest_ev_rate": lowest_ev_rate,
-        "avg_ev_fraction": avg_ev_fraction,
+        "highest_expected_value_rate": best_ev_rate,
+        "lowest_expected_value_rate": worst_ev_rate,
+        "avg_expected_value_fraction_of_best": avg_ev_fraction_of_best,
+        "avg_expected_value_relative_to_range": avg_ev_relative_to_range,
+        "avg_expected_value_regret": avg_ev_regret,
+        # Backward-compatible aliases for earlier EV-metric naming.
+        "highest_ev_rate": best_ev_rate,
+        "lowest_ev_rate": worst_ev_rate,
+        "avg_ev_fraction": avg_ev_fraction_of_best,
     }
 
 
@@ -937,6 +1013,10 @@ def project_result_row_for_output(row: Dict, *, include_response: bool) -> Dict:
         "situation_id",
         "dataset_position",
         "subset_type",
+        "source_stakes",
+        "source_condition",
+        "source_csv_name",
+        "source_situation_id",
         "option_types_besides_cooperate",
         "prompt",
         "num_options",
@@ -951,6 +1031,14 @@ def project_result_row_for_output(row: Dict, *, include_response: bool) -> Dict:
         "option_type",
         "is_best_cara",
         "is_best_linear",
+        "expected_value",
+        "max_expected_value",
+        "min_expected_value",
+        "is_best_expected_value",
+        "is_worst_expected_value",
+        "expected_value_fraction_of_best",
+        "expected_value_relative_to_range",
+        "expected_value_regret",
     ]
     projected = {key: row.get(key) for key in keys}
     stop_reason = row.get("generation_stop_reason")
@@ -968,6 +1056,10 @@ def project_failed_response_for_output(row: Dict) -> Dict:
         "situation_id",
         "dataset_position",
         "subset_type",
+        "source_stakes",
+        "source_condition",
+        "source_csv_name",
+        "source_situation_id",
         "option_types_besides_cooperate",
         "num_options",
         "prompt",
@@ -1165,6 +1257,12 @@ def save_incremental(
         field_name="probability_format",
         ordered_values=list(PROBABILITY_FORMATS),
     )
+    source_stakes_metrics = summarize_results_by_field(
+        results,
+        situation_manifest,
+        field_name="source_stakes",
+        ordered_values=list(SOURCE_STAKES),
+    )
     metrics_by_subset_type = {**subset_metrics, **probability_format_metrics}
     progress_by_subset_type = {
         **summarize_progress_by_field(
@@ -1180,6 +1278,12 @@ def save_incremental(
             ordered_values=list(PROBABILITY_FORMATS),
         ),
     }
+    progress_by_source_stakes = summarize_progress_by_field(
+        results,
+        situation_manifest,
+        field_name="source_stakes",
+        ordered_values=list(SOURCE_STAKES),
+    )
 
     output_data = convert_numpy(
         {
@@ -1190,6 +1294,7 @@ def save_incremental(
             "num_parse_failed": parse_failed_total,
             "metrics_by_subset_type": metrics_by_subset_type,
             "metrics_by_probability_format": probability_format_metrics,
+            "metrics_by_source_stakes": source_stakes_metrics,
             "results": stored_results,
             "resume_records": compact_results_for_resume(results),
             "failed_responses": failed_sample,  # Backwards-compatible key name.
@@ -1208,6 +1313,7 @@ def save_incremental(
                 field_name="probability_format",
                 ordered_values=list(PROBABILITY_FORMATS),
             ),
+            "progress_by_source_stakes": progress_by_source_stakes,
         }
     )
 
@@ -1228,6 +1334,10 @@ def build_situations(df: pd.DataFrame, num_situations: Optional[int]):
         prompt_raw = sit_data["prompt_text"].iloc[0]
         num_options = len(sit_data)
         use_verbal_probs = sit_data["use_verbal_probs"].iloc[0] if "use_verbal_probs" in df.columns else None
+        source_stakes = sit_data["source_stakes"].iloc[0] if "source_stakes" in df.columns else None
+        source_condition = sit_data["source_condition"].iloc[0] if "source_condition" in df.columns else None
+        source_csv_name = sit_data["source_csv_name"].iloc[0] if "source_csv_name" in df.columns else None
+        source_situation_id = sit_data["source_situation_id"].iloc[0] if "source_situation_id" in df.columns else None
         low_bucket_label = (
             clean_bucket_label(sit_data["low_bucket_label"].iloc[0]) if "low_bucket_label" in df.columns else None
         )
@@ -1278,6 +1388,7 @@ def build_situations(df: pd.DataFrame, num_situations: Optional[int]):
 
         options = {}
         best_cara_indices = set()
+        expected_values_by_index = {}
         for _, row in sit_data.iterrows():
             idx = int(row["option_index"])
             letter = chr(ord("a") + idx)
@@ -1286,23 +1397,45 @@ def build_situations(df: pd.DataFrame, num_situations: Optional[int]):
             if not is_best_cara and cara001_best_option_numbers:
                 # Fallback for datasets that store only list-style CARA label columns.
                 is_best_cara = (idx + 1) in cara001_best_option_numbers
-            eu_linear_val = None
-            if "EU_linear_display_3sf" in row.index:
-                try:
-                    eu_linear_val = float(row["EU_linear_display_3sf"])
-                except (TypeError, ValueError):
-                    pass
+            expected_value = compute_expected_value_from_row(row)
+            if expected_value is not None:
+                expected_values_by_index[idx] = expected_value
             option_data = {
                 "type": row["option_type"],
                 "is_best_cara": is_best_cara,
                 "is_best_linear": (idx in linear_best_indices_0) if has_linear_info else None,
                 "option_index": idx,
-                "eu_linear": eu_linear_val,
+                "expected_value": expected_value,
+                # Backward-compatible alias used by some downstream EV summaries.
+                "eu_linear": expected_value,
             }
             options[letter] = option_data
             options[number] = option_data
             if is_best_cara:
                 best_cara_indices.add(idx)
+
+        max_expected_value = None
+        min_expected_value = None
+        best_expected_value_indices = set()
+        worst_expected_value_indices = set()
+        unique_option_data = {id(v): v for v in options.values()}.values()
+        if expected_values_by_index:
+            max_expected_value = max(expected_values_by_index.values())
+            min_expected_value = min(expected_values_by_index.values())
+            best_expected_value_indices = {
+                idx for idx, value in expected_values_by_index.items() if abs(value - max_expected_value) < 1e-12
+            }
+            worst_expected_value_indices = {
+                idx for idx, value in expected_values_by_index.items() if abs(value - min_expected_value) < 1e-12
+            }
+        for option_data in unique_option_data:
+            idx = option_data["option_index"]
+            option_data["is_best_expected_value"] = (
+                idx in best_expected_value_indices if expected_values_by_index else None
+            )
+            option_data["is_worst_expected_value"] = (
+                idx in worst_expected_value_indices if expected_values_by_index else None
+            )
 
         situations.append(
             {
@@ -1318,6 +1451,14 @@ def build_situations(df: pd.DataFrame, num_situations: Optional[int]):
                 "bucket_label": bucket_label,
                 "is_lin_only": lin_only,
                 "best_cara_indices": sorted(best_cara_indices),
+                "source_stakes": source_stakes,
+                "source_condition": source_condition,
+                "source_csv_name": source_csv_name,
+                "source_situation_id": source_situation_id,
+                "max_expected_value": max_expected_value,
+                "min_expected_value": min_expected_value,
+                "best_expected_value_indices": sorted(best_expected_value_indices),
+                "worst_expected_value_indices": sorted(worst_expected_value_indices),
             }
         )
     return situations
@@ -1818,6 +1959,10 @@ def run_single_alpha_eval(
                 "situation_id": sit["situation_id"],
                 "dataset_position": sit["dataset_position"],
                 "subset_type": sit["subset_type"],
+                "source_stakes": sit.get("source_stakes"),
+                "source_condition": sit.get("source_condition"),
+                "source_csv_name": sit.get("source_csv_name"),
+                "source_situation_id": sit.get("source_situation_id"),
                 "option_types_besides_cooperate": sit["option_types_besides_cooperate"],
                 "prompt": eval_prompt,
                 "num_options": sit["num_options"],
@@ -1838,24 +1983,52 @@ def run_single_alpha_eval(
 
             if choice and choice in sit["options"]:
                 chosen = sit["options"][choice]
-                # Compute EV metrics if eu_linear data is available.
-                chosen_eu = chosen.get("eu_linear")
-                all_eu_vals = _collect_eu_linear_values(sit["options"])
-                is_lowest_ev = None
-                ev_fraction = None
-                if chosen_eu is not None and all_eu_vals:
-                    max_ev = max(all_eu_vals)
-                    min_ev = min(all_eu_vals)
-                    is_lowest_ev = abs(chosen_eu - min_ev) < 1e-12
-                    ev_fraction = chosen_eu / max_ev if max_ev > 0 else (1.0 if max_ev == 0 and chosen_eu == 0 else None)
                 result_row.update(
                     {
                         "option_type": chosen["type"],
                         "is_best_cara": chosen["is_best_cara"],
                         "is_best_linear": chosen["is_best_linear"],
-                        "eu_linear": chosen_eu,
-                        "is_lowest_ev": is_lowest_ev,
-                        "ev_fraction": ev_fraction,
+                        "expected_value": chosen.get("expected_value"),
+                        "max_expected_value": sit.get("max_expected_value"),
+                        "min_expected_value": sit.get("min_expected_value"),
+                        "is_best_expected_value": chosen.get("is_best_expected_value"),
+                        "is_worst_expected_value": chosen.get("is_worst_expected_value"),
+                        "expected_value_fraction_of_best": (
+                            (chosen.get("expected_value") / sit.get("max_expected_value"))
+                            if chosen.get("expected_value") is not None
+                            and sit.get("max_expected_value") not in (None, 0)
+                            else None
+                        ),
+                        "expected_value_relative_to_range": (
+                            1.0
+                            if chosen.get("expected_value") is not None
+                            and sit.get("max_expected_value") is not None
+                            and sit.get("min_expected_value") is not None
+                            and abs(sit.get("max_expected_value") - sit.get("min_expected_value")) < 1e-12
+                            else (
+                                (chosen.get("expected_value") - sit.get("min_expected_value"))
+                                / (sit.get("max_expected_value") - sit.get("min_expected_value"))
+                            )
+                            if chosen.get("expected_value") is not None
+                            and sit.get("max_expected_value") is not None
+                            and sit.get("min_expected_value") is not None
+                            else None
+                        ),
+                        "expected_value_regret": (
+                            sit.get("max_expected_value") - chosen.get("expected_value")
+                            if chosen.get("expected_value") is not None
+                            and sit.get("max_expected_value") is not None
+                            else None
+                        ),
+                        # Backward-compatible aliases for older EV-metric naming.
+                        "eu_linear": chosen.get("expected_value"),
+                        "is_lowest_ev": chosen.get("is_worst_expected_value"),
+                        "ev_fraction": (
+                            (chosen.get("expected_value") / sit.get("max_expected_value"))
+                            if chosen.get("expected_value") is not None
+                            and sit.get("max_expected_value") not in (None, 0)
+                            else None
+                        ),
                     }
                 )
             else:
@@ -1864,6 +2037,14 @@ def run_single_alpha_eval(
                         "option_type": None,
                         "is_best_cara": None,
                         "is_best_linear": None,
+                        "expected_value": None,
+                        "max_expected_value": sit.get("max_expected_value"),
+                        "min_expected_value": sit.get("min_expected_value"),
+                        "is_best_expected_value": None,
+                        "is_worst_expected_value": None,
+                        "expected_value_fraction_of_best": None,
+                        "expected_value_relative_to_range": None,
+                        "expected_value_regret": None,
                         "eu_linear": None,
                         "is_lowest_ev": None,
                         "ev_fraction": None,
@@ -1874,6 +2055,10 @@ def run_single_alpha_eval(
                         "situation_id": sit["situation_id"],
                         "dataset_position": sit["dataset_position"],
                         "subset_type": sit["subset_type"],
+                        "source_stakes": sit.get("source_stakes"),
+                        "source_condition": sit.get("source_condition"),
+                        "source_csv_name": sit.get("source_csv_name"),
+                        "source_situation_id": sit.get("source_situation_id"),
                         "option_types_besides_cooperate": sit["option_types_besides_cooperate"],
                         "num_options": sit["num_options"],
                         "prompt": eval_prompt,
@@ -1955,6 +2140,12 @@ def run_single_alpha_eval(
             ordered_values=list(PROBABILITY_FORMATS),
         ),
     }
+    source_stakes_metrics = summarize_results_by_field(
+        results,
+        situation_manifest,
+        field_name="source_stakes",
+        ordered_values=list(SOURCE_STAKES),
+    )
 
     print(f"\n{'='*50}")
     print("EVALUATION RESULTS (Permissive Parser)")
@@ -1968,6 +2159,18 @@ def run_single_alpha_eval(
     print(f"% choosing STEAL:     {100*metrics['steal_rate']:.1f}%")
     print(f"% choosing best CARA: {100*metrics['best_cara_rate']:.1f}%")
     print(f"% choosing best LIN:  {100*metrics['best_linear_rate']:.1f}%")
+    if metrics.get("highest_expected_value_rate") is not None:
+        print(f"% choosing highest EV: {100*metrics['highest_expected_value_rate']:.1f}%")
+        print(f"% choosing lowest EV:  {100*metrics['lowest_expected_value_rate']:.1f}%")
+        avg_ev_fraction = metrics.get("avg_expected_value_fraction_of_best")
+        if avg_ev_fraction is not None:
+            print(f"Avg EV / best EV:      {avg_ev_fraction:.3f}")
+        avg_ev_relative = metrics.get("avg_expected_value_relative_to_range")
+        if avg_ev_relative is not None:
+            print(f"Avg EV range score:    {avg_ev_relative:.3f}")
+        avg_ev_regret = metrics.get("avg_expected_value_regret")
+        if avg_ev_regret is not None:
+            print(f"Avg EV regret:         {avg_ev_regret:.3f}")
     if metrics_by_subset_type:
         print("\nBy subset type / probability format:")
         for group_name in list(SUBSET_TYPES) + list(PROBABILITY_FORMATS):
@@ -1983,6 +2186,25 @@ def run_single_alpha_eval(
                 f"CARA={100*subset_metrics['best_cara_rate']:.1f}% | "
                 f"LIN={100*subset_metrics['best_linear_rate']:.1f}%"
             )
+    if source_stakes_metrics:
+        print("\nBy source stakes:")
+        for group_name in SOURCE_STAKES:
+            subset_payload = source_stakes_metrics.get(group_name)
+            if not subset_payload:
+                continue
+            subset_metrics = subset_payload["metrics"]
+            line = (
+                f"  {group_name}: valid={subset_payload['num_valid']}/{subset_payload['num_total']} | "
+                f"highestEV={100*subset_metrics['highest_expected_value_rate']:.1f}% | "
+                f"lowestEV={100*subset_metrics['lowest_expected_value_rate']:.1f}%"
+            )
+            if subset_metrics.get("avg_expected_value_fraction_of_best") is not None:
+                line += f" | EV/best={subset_metrics['avg_expected_value_fraction_of_best']:.3f}"
+            if subset_metrics.get("avg_expected_value_relative_to_range") is not None:
+                line += f" | EVrange={subset_metrics['avg_expected_value_relative_to_range']:.3f}"
+            if subset_metrics.get("avg_expected_value_regret") is not None:
+                line += f" | EVregret={subset_metrics['avg_expected_value_regret']:.3f}"
+            print(line)
     print(f"\nTotal time: {total_elapsed/60:.1f} minutes ({total_elapsed:.0f}s)")
     avg_per_sit = (sum(generation_times)/len(generation_times)) if generation_times else 0.0
     print(f"Avg per situation (this session): {avg_per_sit:.1f}s")

@@ -895,16 +895,15 @@ def summarize_results(results):
         cara_rate = sum(r["is_best_cara"] for r in valid) / len(valid)
         linear_valid = [r for r in valid if r.get("is_best_linear") is not None]
         linear_rate = sum(r["is_best_linear"] for r in linear_valid) / len(linear_valid) if linear_valid else 0
-        ev_valid = [r for r in valid if r.get("is_best_expected_value") is not None]
-        ev_ratio_valid = [r for r in ev_valid if r.get("expected_value_fraction_of_best") is not None]
-        ev_relative_valid = [r for r in ev_valid if r.get("expected_value_relative_to_range") is not None]
-        ev_regret_valid = [r for r in ev_valid if r.get("expected_value_regret") is not None]
-        best_ev_rate = (
-            sum(r["is_best_expected_value"] for r in ev_valid) / len(ev_valid) if ev_valid else 0
+        worst_linear_valid = [r for r in valid if r.get("is_worst_linear") is not None]
+        worst_linear_rate = (
+            sum(r["is_worst_linear"] for r in worst_linear_valid) / len(worst_linear_valid)
+            if worst_linear_valid
+            else 0
         )
-        worst_ev_rate = (
-            sum(r["is_worst_expected_value"] for r in ev_valid) / len(ev_valid) if ev_valid else 0
-        )
+        ev_ratio_valid = [r for r in valid if r.get("expected_value_fraction_of_best") is not None]
+        ev_relative_valid = [r for r in valid if r.get("expected_value_relative_to_range") is not None]
+        ev_regret_valid = [r for r in valid if r.get("expected_value_regret") is not None]
         avg_ev_fraction_of_best = (
             sum(float(r["expected_value_fraction_of_best"]) for r in ev_ratio_valid) / len(ev_ratio_valid)
             if ev_ratio_valid
@@ -922,7 +921,7 @@ def summarize_results(results):
         )
     else:
         cooperate_rate = rebel_rate = steal_rate = cara_rate = linear_rate = 0
-        best_ev_rate = worst_ev_rate = 0
+        worst_linear_rate = 0
         avg_ev_fraction_of_best = None
         avg_ev_relative_to_range = None
         avg_ev_regret = None
@@ -935,15 +934,10 @@ def summarize_results(results):
         "steal_rate": steal_rate,
         "best_cara_rate": cara_rate,
         "best_linear_rate": linear_rate,
-        "highest_expected_value_rate": best_ev_rate,
-        "lowest_expected_value_rate": worst_ev_rate,
+        "worst_linear_rate": worst_linear_rate,
         "avg_expected_value_fraction_of_best": avg_ev_fraction_of_best,
         "avg_expected_value_relative_to_range": avg_ev_relative_to_range,
         "avg_expected_value_regret": avg_ev_regret,
-        # Backward-compatible aliases for earlier EV-metric naming.
-        "highest_ev_rate": best_ev_rate,
-        "lowest_ev_rate": worst_ev_rate,
-        "avg_ev_fraction": avg_ev_fraction_of_best,
     }
 
 
@@ -1046,11 +1040,10 @@ def project_result_row_for_output(row: Dict, *, include_response: bool) -> Dict:
         "option_type",
         "is_best_cara",
         "is_best_linear",
+        "is_worst_linear",
         "expected_value",
         "max_expected_value",
         "min_expected_value",
-        "is_best_expected_value",
-        "is_worst_expected_value",
         "expected_value_fraction_of_best",
         "expected_value_relative_to_range",
         "expected_value_regret",
@@ -1445,12 +1438,7 @@ def build_situations(df: pd.DataFrame, num_situations: Optional[int]):
             }
         for option_data in unique_option_data:
             idx = option_data["option_index"]
-            option_data["is_best_expected_value"] = (
-                idx in best_expected_value_indices if expected_values_by_index else None
-            )
-            option_data["is_worst_expected_value"] = (
-                idx in worst_expected_value_indices if expected_values_by_index else None
-            )
+            option_data["is_worst_linear"] = idx in worst_expected_value_indices if expected_values_by_index else None
 
         situations.append(
             {
@@ -2008,11 +1996,10 @@ def run_single_alpha_eval(
                         "option_type": chosen["type"],
                         "is_best_cara": chosen["is_best_cara"],
                         "is_best_linear": chosen["is_best_linear"],
+                        "is_worst_linear": chosen.get("is_worst_linear"),
                         "expected_value": chosen.get("expected_value"),
                         "max_expected_value": sit.get("max_expected_value"),
                         "min_expected_value": sit.get("min_expected_value"),
-                        "is_best_expected_value": chosen.get("is_best_expected_value"),
-                        "is_worst_expected_value": chosen.get("is_worst_expected_value"),
                         "expected_value_fraction_of_best": (
                             (chosen.get("expected_value") / sit.get("max_expected_value"))
                             if chosen.get("expected_value") is not None
@@ -2040,15 +2027,6 @@ def run_single_alpha_eval(
                             and sit.get("max_expected_value") is not None
                             else None
                         ),
-                        # Backward-compatible aliases for older EV-metric naming.
-                        "eu_linear": chosen.get("expected_value"),
-                        "is_lowest_ev": chosen.get("is_worst_expected_value"),
-                        "ev_fraction": (
-                            (chosen.get("expected_value") / sit.get("max_expected_value"))
-                            if chosen.get("expected_value") is not None
-                            and sit.get("max_expected_value") not in (None, 0)
-                            else None
-                        ),
                     }
                 )
             else:
@@ -2057,17 +2035,13 @@ def run_single_alpha_eval(
                         "option_type": None,
                         "is_best_cara": None,
                         "is_best_linear": None,
+                        "is_worst_linear": None,
                         "expected_value": None,
                         "max_expected_value": sit.get("max_expected_value"),
                         "min_expected_value": sit.get("min_expected_value"),
-                        "is_best_expected_value": None,
-                        "is_worst_expected_value": None,
                         "expected_value_fraction_of_best": None,
                         "expected_value_relative_to_range": None,
                         "expected_value_regret": None,
-                        "eu_linear": None,
-                        "is_lowest_ev": None,
-                        "ev_fraction": None,
                     }
                 )
                 failed_responses.append(
@@ -2179,18 +2153,24 @@ def run_single_alpha_eval(
     print(f"% choosing STEAL:     {100*metrics['steal_rate']:.1f}%")
     print(f"% choosing best CARA: {100*metrics['best_cara_rate']:.1f}%")
     print(f"% choosing best LIN:  {100*metrics['best_linear_rate']:.1f}%")
-    if metrics.get("highest_expected_value_rate") is not None:
-        print(f"% choosing highest EV: {100*metrics['highest_expected_value_rate']:.1f}%")
-        print(f"% choosing lowest EV:  {100*metrics['lowest_expected_value_rate']:.1f}%")
-        avg_ev_fraction = metrics.get("avg_expected_value_fraction_of_best")
+    avg_ev_fraction = metrics.get("avg_expected_value_fraction_of_best")
+    avg_ev_relative = metrics.get("avg_expected_value_relative_to_range")
+    avg_ev_regret = metrics.get("avg_expected_value_regret")
+    worst_linear_rate = metrics.get("worst_linear_rate")
+    if (
+        avg_ev_fraction is not None
+        or avg_ev_relative is not None
+        or avg_ev_regret is not None
+        or worst_linear_rate is not None
+    ):
+        if worst_linear_rate is not None:
+            print(f"% choosing worst LIN: {100*worst_linear_rate:.1f}%")
         if avg_ev_fraction is not None:
-            print(f"Avg EV / best EV:      {avg_ev_fraction:.3f}")
-        avg_ev_relative = metrics.get("avg_expected_value_relative_to_range")
+            print(f"Avg EV / best EV:     {avg_ev_fraction:.3f}")
         if avg_ev_relative is not None:
-            print(f"Avg EV range score:    {avg_ev_relative:.3f}")
-        avg_ev_regret = metrics.get("avg_expected_value_regret")
+            print(f"Avg EV range score:   {avg_ev_relative:.3f}")
         if avg_ev_regret is not None:
-            print(f"Avg EV regret:         {avg_ev_regret:.3f}")
+            print(f"Avg EV regret:        {avg_ev_regret:.3f}")
     if metrics_by_subset_type:
         print("\nBy subset type / probability format:")
         for group_name in list(SUBSET_TYPES) + list(PROBABILITY_FORMATS):
@@ -2215,8 +2195,8 @@ def run_single_alpha_eval(
             subset_metrics = subset_payload["metrics"]
             line = (
                 f"  {group_name}: valid={subset_payload['num_valid']}/{subset_payload['num_total']} | "
-                f"highestEV={100*subset_metrics['highest_expected_value_rate']:.1f}% | "
-                f"lowestEV={100*subset_metrics['lowest_expected_value_rate']:.1f}%"
+                f"bestLIN={100*subset_metrics['best_linear_rate']:.1f}% | "
+                f"worstLIN={100*subset_metrics['worst_linear_rate']:.1f}%"
             )
             if subset_metrics.get("avg_expected_value_fraction_of_best") is not None:
                 line += f" | EV/best={subset_metrics['avg_expected_value_fraction_of_best']:.3f}"

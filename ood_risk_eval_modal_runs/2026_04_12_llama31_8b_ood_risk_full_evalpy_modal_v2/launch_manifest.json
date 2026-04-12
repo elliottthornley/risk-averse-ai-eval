@@ -1,0 +1,22 @@
+{
+  "run_name": "2026_04_12_llama31_8b_ood_risk_full_evalpy_modal_v2",
+  "launched_at": "2026-04-12T11:39:21.970500",
+  "modal_app": "risk-averse-ood-risk-eval-bundle",
+  "modal_function_call_id": "fc-01KP15HXXCVDT1DNBSF8A6RTD3",
+  "modal_dashboard_url": "https://modal.com/id/fc-01KP15HXXCVDT1DNBSF8A6RTD3",
+  "results_volume": "risk-averse-ood-risk-results",
+  "hf_cache_volume": "risk-averse-ood-risk-hf-cache",
+  "vllm_cache_volume": "risk-averse-ood-risk-vllm-cache",
+  "base_model": "meta-llama/Llama-3.1-8B-Instruct",
+  "datasets": [
+    "medium_stakes_validation",
+    "high_stakes_test",
+    "astronomical_stakes_deployment",
+    "steals_test"
+  ],
+  "num_situations_override": null,
+  "batch_size": 4,
+  "save_every": 4,
+  "backup_every": 20,
+  "vllm_max_model_len": 8192
+}

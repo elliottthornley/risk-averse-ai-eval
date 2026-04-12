@@ -1,0 +1,33 @@
+{
+  "run_name": "2026_04_12_llama31_8b_ood_risk_full_evalpy_modal_v2",
+  "base_model": "meta-llama/Llama-3.1-8B-Instruct",
+  "model_path": null,
+  "datasets": [
+    "medium_stakes_validation",
+    "high_stakes_test",
+    "astronomical_stakes_deployment",
+    "steals_test"
+  ],
+  "num_situations_override": null,
+  "backend": "vllm",
+  "temperature": 0.6,
+  "top_p": 0.95,
+  "top_k": 20,
+  "seed": 12345,
+  "max_new_tokens": 4096,
+  "reasoning_max_tokens": 800,
+  "batch_size": 4,
+  "save_every": 4,
+  "backup_every": 20,
+  "resume": true,
+  "disable_thinking": false,
+  "prompt_suffix": "",
+  "vllm": {
+    "gpu_memory_utilization": 0.9,
+    "max_model_len": 8192,
+    "dtype": "auto",
+    "enable_prefix_caching": true,
+    "max_lora_rank": null
+  },
+  "launched_at": "2026-04-12T15:39:35.265848"
+}

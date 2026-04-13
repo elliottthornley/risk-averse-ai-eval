@@ -25,7 +25,7 @@ import torch
 
 from answer_parser import apply_finish_reason_safeguard, extract_choice_with_strategy, infer_option_label_style
 from dataset_schema_utils import ensure_option_level_dataframe
-from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
+from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT, default_system_prompt_for_dataset
 
 try:
     from icv_steering_experiment import build_icv_direction, read_jsonl
@@ -2422,8 +2422,11 @@ def main():
     parser.add_argument(
         "--system_prompt",
         type=str,
-        default=DEFAULT_SYSTEM_PROMPT,
-        help="Shared system prompt prepended to every situation",
+        default=None,
+        help=(
+            "Shared system prompt prepended to every situation. "
+            "If omitted, evaluate.py chooses the built-in default for the selected dataset family."
+        ),
     )
     parser.add_argument(
         "--prompt_suffix",
@@ -2630,6 +2633,11 @@ def main():
             args.dataset,
             args.dataset_variant,
         )
+
+    if args.system_prompt is None:
+        args.system_prompt = default_system_prompt_for_dataset(args.dataset_base_alias)
+        if args.dataset_base_alias != "custom":
+            print(f"Using default system prompt for dataset family: {args.dataset_base_alias}")
 
     if args.lin_only and args.dataset not in {
         "custom",

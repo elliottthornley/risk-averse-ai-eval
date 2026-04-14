@@ -51,6 +51,12 @@ CANONICAL_DATASET_ALIASES = {
 }
 CURRENT_EXTRA_DATASET_ALIASES = {
     "reward_model_validation_rebels_only": "data/2026_03_22_reward_model_val_set_400_Rebels_clean.csv",
+    "reward_model_high_stakes_test": "data/2026_03_22_high_stakes_test_set_746_Rebels_CoTs_for_evaluating_reward_model_from_Sonnet.csv",
+    "reward_model_high_stakes_test_rebels_only": "data/2026_03_22_high_stakes_test_set_746_Rebels_CoTs_for_evaluating_reward_model_from_Sonnet.csv",
+    "reward_model_astronomical_stakes_deployment": "data/2026_03_22_astronomical_stakes_deployment_set_707_Rebels_CoTs_for_evaluating_reward_model_from_Sonnet.csv",
+    "reward_model_astronomical_stakes_deployment_rebels_only": "data/2026_03_22_astronomical_stakes_deployment_set_707_Rebels_CoTs_for_evaluating_reward_model_from_Sonnet.csv",
+    "reward_model_steals_test": "data/2026_03_22_test_set_928_Steals_CoTs_for_evaluating_reward_model_from_Sonnet.csv",
+    "reward_model_steals_test_steals_only": "data/2026_03_22_test_set_928_Steals_CoTs_for_evaluating_reward_model_from_Sonnet.csv",
 }
 LEGACY_NONDEFAULT_DATASET_ALIASES = {
     "reward_model_validation_steals_only": "data/legacy_nondefault/OLD_2026_03_22_reward_model_val_set_167_Steals.csv",
@@ -80,6 +86,14 @@ def resolve_path(path: str) -> str:
     if os.path.exists(script_relative):
         return script_relative
     return os.path.abspath(expanded)
+
+
+def count_dataset_rows(csv_path: str) -> Optional[int]:
+    """Best-effort row count for list_datasets output."""
+    try:
+        return len(pd.read_csv(csv_path))
+    except Exception:
+        return None
 
 
 def remove_instruction_suffix(prompt: str) -> str:
@@ -658,7 +672,7 @@ def select_pairs(
     *,
     start_position: int,
     end_position: Optional[int],
-    num_pairs: int,
+    num_pairs: Optional[int],
 ) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
     sliced = [pair for pair in pairs if pair["dataset_position"] >= start_position]
     if end_position is not None:
@@ -680,7 +694,7 @@ def select_pairs(
         seen_exact_rows.add(dedupe_key)
         selected.append(pair)
 
-        if len(selected) >= num_pairs:
+        if num_pairs is not None and len(selected) >= num_pairs:
             break
 
     selection_stats = {
@@ -927,8 +941,8 @@ def main():
     parser.add_argument(
         "--num_pairs",
         type=int,
-        default=50,
-        help="Number of pair rows to evaluate (drops only exact duplicate prompt/chosen/rejected rows)",
+        default=None,
+        help="Number of pair rows to evaluate after deduping exact duplicate prompt/chosen/rejected rows (default: all selected rows)",
     )
     parser.add_argument("--output", type=str, default=None, help="Output JSON path (auto-generated if omitted)")
     parser.add_argument(
@@ -983,8 +997,8 @@ def main():
     parser.add_argument(
         "--stop_after",
         type=int,
-        default=50,
-        help="Evaluate at most this many NEW pair rows in this invocation (default: 50)",
+        default=None,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument("--resume", action="store_true", help="Resume from existing output JSON if present")
     parser.add_argument(
@@ -1019,13 +1033,22 @@ def main():
     if args.list_datasets:
         print("Built-in reward-model datasets (recommended current defaults):")
         for name, rel_path in CANONICAL_DATASET_ALIASES.items():
-            print(f"  {name:32} -> {resolve_path(rel_path)}")
+            resolved = resolve_path(rel_path)
+            row_count = count_dataset_rows(resolved)
+            row_count_text = f" ({row_count} rows)" if row_count is not None else ""
+            print(f"  {name:48} -> {resolved}{row_count_text}")
         print("\nAdditional current aliases:")
         for name, rel_path in CURRENT_EXTRA_DATASET_ALIASES.items():
-            print(f"  {name:32} -> {resolve_path(rel_path)}")
+            resolved = resolve_path(rel_path)
+            row_count = count_dataset_rows(resolved)
+            row_count_text = f" ({row_count} rows)" if row_count is not None else ""
+            print(f"  {name:48} -> {resolved}{row_count_text}")
         print("\nLegacy/nondefault aliases (not recommended for new runs):")
         for name, rel_path in LEGACY_NONDEFAULT_DATASET_ALIASES.items():
-            print(f"  {name:32} -> {resolve_path(rel_path)}")
+            resolved = resolve_path(rel_path)
+            row_count = count_dataset_rows(resolved)
+            row_count_text = f" ({row_count} rows)" if row_count is not None else ""
+            print(f"  {name:48} -> {resolved}{row_count_text}")
         return
 
     if args.custom_csv:
@@ -1052,7 +1075,7 @@ def main():
         raise ValueError("--start_position must be >= 1")
     if args.end_position is not None and args.end_position < args.start_position:
         raise ValueError("--end_position must be >= --start_position")
-    if args.num_pairs < 1:
+    if args.num_pairs is not None and args.num_pairs < 1:
         raise ValueError("--num_pairs must be >= 1")
     if args.stop_after is not None and args.stop_after < 1:
         raise ValueError("--stop_after must be >= 1")
@@ -1094,6 +1117,11 @@ def main():
     )
     if not selected_pairs:
         raise ValueError("No reward-model pair rows selected after applying dataset slice arguments.")
+    if args.num_pairs is None:
+        print(
+            "No --num_pairs provided; using the full deduplicated selected dataset slice "
+            f"({len(selected_pairs)} pair rows)."
+        )
 
     for pair in selected_pairs:
         pair["prompt"] = build_eval_prompt(pair["prompt_raw"], args.prompt_suffix)

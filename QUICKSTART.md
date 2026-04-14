@@ -97,27 +97,49 @@ python evaluate.py \
 python evaluate_reward_model.py \
   --base_model /path/to/reward-model \
   --dataset reward_model_validation \
-  --num_pairs 200 \
-  --stop_after 200 \
   --batch_size 16 \
-  --output reward_model_eval.json
+  --output reward_model_validation.json
 ```
 
 Current reward-model dataset aliases:
 
-- `reward_model_validation` -> current `500`-pair `rebels_only` validation split
+- `reward_model_validation` -> current `400`-pair `rebels_only` validation split
+- `reward_model_high_stakes_test` -> current `746`-pair held-out `rebels_only` high-stakes test split
+- `reward_model_astronomical_stakes_deployment` -> current `707`-pair held-out `rebels_only` astronomical deployment split
+- `reward_model_steals_test` -> current `928`-pair held-out `steals_only` test split
 - `reward_model_validation_steals_only` -> legacy/nondefault `167`-pair `steals_only` split
 - `reward_model_validation_combined_rebels_and_steals` -> legacy/nondefault combined `667`-pair split
 
 ## Save / Resume
 
-Defaults:
+Defaults for `evaluate.py`:
 
 - `--save_every 4`
 - `--backup_every 20`
-- `--stop_after` is off by default and is now mainly an advanced smoke-test / chunking flag
+
+Defaults for `evaluate_reward_model.py`:
+
+- `--save_every 16`
+- `--backup_every 80`
+- `--stop_after` is now mainly an advanced smoke-test / chunking flag
 
 If the output JSON already exists and you do not pass `--resume`, `evaluate.py` now errors instead of overwriting it.
+
+Reward-model evaluator normal path:
+
+- do not pass `--num_pairs` unless you want a smaller slice
+- do not pass `--stop_after` unless you are deliberately doing a smoke test or chunked resume
+
+Advanced reward-model smoke example:
+
+```bash
+python evaluate_reward_model.py \
+  --base_model /path/to/reward-model \
+  --dataset reward_model_high_stakes_test \
+  --stop_after 50 \
+  --batch_size 16 \
+  --output reward_model_high_stakes_smoke.json
+```
 
 Resume example:
 

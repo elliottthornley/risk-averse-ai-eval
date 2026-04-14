@@ -274,12 +274,16 @@ Meaning:
 Current built-in reward-model datasets:
 
 - `reward_model_validation` -> [data/2026_03_22_reward_model_val_set_400_Rebels_clean.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_reward_model_val_set_400_Rebels_clean.csv)
+- `reward_model_high_stakes_test` -> [data/2026_03_22_high_stakes_test_set_746_Rebels_CoTs_for_evaluating_reward_model_from_Sonnet.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_high_stakes_test_set_746_Rebels_CoTs_for_evaluating_reward_model_from_Sonnet.csv)
+- `reward_model_astronomical_stakes_deployment` -> [data/2026_03_22_astronomical_stakes_deployment_set_707_Rebels_CoTs_for_evaluating_reward_model_from_Sonnet.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_astronomical_stakes_deployment_set_707_Rebels_CoTs_for_evaluating_reward_model_from_Sonnet.csv)
+- `reward_model_steals_test` -> [data/2026_03_22_test_set_928_Steals_CoTs_for_evaluating_reward_model_from_Sonnet.csv](/Users/elliottthornley/risk-averse-ai-eval/data/2026_03_22_test_set_928_Steals_CoTs_for_evaluating_reward_model_from_Sonnet.csv)
 
 Recommended current path:
 
 - use `reward_model_validation` as the headline reward-model validation set
-- treat the steals-only and combined reward-model CSVs as legacy/nondefault
-- older rebel-only reward-model validation CSV variants are kept only in the local project folder, not in the repo
+- use `reward_model_high_stakes_test`, `reward_model_astronomical_stakes_deployment`, and `reward_model_steals_test` for the cleaned held-out reward-model checks
+- treat the old steals-only and combined reward-model validation CSVs as legacy/nondefault
+- use the verbose `_rebels_only` / `_steals_only` alias variants only if you want the name itself to spell out the subset type
 
 Example headline run:
 
@@ -287,16 +291,45 @@ Example headline run:
 python evaluate_reward_model.py \
   --base_model /path/to/reward-model \
   --dataset reward_model_validation \
-  --num_pairs 200 \
-  --stop_after 200 \
   --batch_size 16 \
-  --output reward_model_eval.json
+  --output reward_model_validation.json
 ```
 
-The current reward-model split is:
+Example held-out runs:
 
-- `400` clean audited `rebels_only` situations in the canonical validation alias
-- `167` `steals_only` pairs
+```bash
+python evaluate_reward_model.py \
+  --base_model /path/to/reward-model \
+  --dataset reward_model_high_stakes_test \
+  --batch_size 16 \
+  --output reward_model_high_stakes_test.json
+```
+
+```bash
+python evaluate_reward_model.py \
+  --base_model /path/to/reward-model \
+  --dataset reward_model_astronomical_stakes_deployment \
+  --batch_size 16 \
+  --output reward_model_astronomical_stakes_deployment.json
+```
+
+```bash
+python evaluate_reward_model.py \
+  --base_model /path/to/reward-model \
+  --dataset reward_model_steals_test \
+  --batch_size 16 \
+  --output reward_model_steals_test.json
+```
+
+The current recommended reward-model split is:
+
+- `400` clean audited `rebels_only` validation pairs in the canonical validation alias
+- `746` clean audited held-out `rebels_only` high-stakes test pairs
+- `707` clean audited held-out `rebels_only` astronomical deployment pairs
+- `928` clean audited held-out `steals_only` test pairs
+
+`evaluate_reward_model.py` now uses the full selected dataset slice by default when `--num_pairs` is omitted.
+`--stop_after` still exists for advanced smoke tests or chunked resume runs, but it is no longer part of the normal path.
 
 Those steals-only and combined reward-model files are now kept under [data/legacy_nondefault](/Users/elliottthornley/risk-averse-ai-eval/data/legacy_nondefault) with `OLD_` prefixes.
 

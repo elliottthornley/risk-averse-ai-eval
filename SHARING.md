@@ -56,11 +56,15 @@ Reward-model eval:
 python evaluate_reward_model.py \
   --base_model /path/to/reward-model \
   --dataset reward_model_validation \
-  --num_pairs 200 \
-  --stop_after 200 \
   --batch_size 16 \
-  --output reward_model_eval.json
+  --output reward_model_validation.json
 ```
+
+Held-out reward-model evals use the built-in aliases:
+
+- `reward_model_high_stakes_test`
+- `reward_model_astronomical_stakes_deployment`
+- `reward_model_steals_test`
 
 ## Important Reminders
 

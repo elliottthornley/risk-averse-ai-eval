@@ -116,6 +116,10 @@ def _tail_sentences(text: str, limit: int = 8) -> List[str]:
     return sentences[-limit:]
 
 
+def _strip_leading_numbered_prefix(text: str) -> str:
+    return re.sub(r"^\s*\d+(?:[\.\:])?\s+", "", text, count=1)
+
+
 def infer_option_label_style(prompt_text: str, num_options: int) -> Optional[str]:
     """Infer whether the prompt enumerates options with numbers or letters."""
     if not isinstance(prompt_text, str) or not prompt_text.strip():
@@ -262,62 +266,117 @@ def extract_choice_with_strategy(
         return ChoiceParseResult(choice=boxed_choice, strategy="boxed")
 
     lines = [line.strip() for line in tail.splitlines() if line.strip()]
+    stripped_tail = "\n".join(_strip_leading_numbered_prefix(line) for line in tail.splitlines())
+    tail_candidates = [tail]
+    if stripped_tail != tail:
+        tail_candidates.append(stripped_tail)
 
     # 3) Short explicit answer lines near the end. This is more reliable than
     # earlier reasoning mentions like "if you choose option 1".
     for line in reversed(lines[-8:]):
-        if len(line) > 90:
-            continue
+        line_candidates = [line]
+        stripped_line = _strip_leading_numbered_prefix(line)
+        if stripped_line != line:
+            line_candidates.append(stripped_line)
+        for candidate in line_candidates:
+            if len(candidate) > 90:
+                continue
+            m = re.fullmatch(
+                rf'(?:{explicit_marker})?\s*[:\-]?\s*(?:is\s+)?'
+                r'(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?\.?',
+                candidate,
+                flags=re.IGNORECASE,
+            )
+            if not m:
+                continue
+            token = _normalize_label_token(m.group(1))
+            if token in valid:
+                return ChoiceParseResult(choice=token, strategy="short_answer_line")
+
+    # 3b) Single-line responses that simply echo one option's text.
+    if len(lines) == 1:
         m = re.fullmatch(
-            rf'(?:{explicit_marker})?\s*[:\-]?\s*(?:is\s+)?'
-            r'(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?\.?',
-            line,
+            r'[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?(?:[\.\:])?\s+(.+)',
+            lines[0],
             flags=re.IGNORECASE,
         )
-        if not m:
-            continue
-        token = _normalize_label_token(m.group(1))
-        if token in valid:
-            return ChoiceParseResult(choice=token, strategy="short_answer_line")
+        if m:
+            token = _normalize_label_token(m.group(1))
+            remainder = m.group(2).strip()
+            other_label_hits = _extract_valid_matches(
+                r'[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?[\.\:]\s',
+                remainder,
+                valid,
+            )
+            looks_like_option_text = bool(
+                re.search(
+                    r'\$|%|\b(?:chance|probability|likely|unlikely|certain|improbable|probable|give)\b',
+                    remainder,
+                    flags=re.IGNORECASE,
+                )
+            )
+            starts_like_reasoning = bool(
+                re.match(r'\b(?:i|we|after|because|therefore|so|option)\b', remainder, flags=re.IGNORECASE)
+            )
+            if token in valid and len(remainder) >= 12 and looks_like_option_text and not starts_like_reasoning and not other_label_hits:
+                return ChoiceParseResult(choice=token, strategy="option_echo_line")
 
     # 4) Explicit answer markers.
-    answer_records = _valid_match_records(
-        rf'{explicit_marker}\s*[:\-]?\s*'
-        r'(?:is\s+)?(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?'
-        r'(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))',
-        tail,
-        valid,
-    )
-    for token, match in reversed(answer_records):
-        if not _is_hedged_or_ambiguous_match(tail, match):
-            return ChoiceParseResult(choice=token, strategy="answer_marker")
+    for tail_candidate in tail_candidates:
+        answer_records = _valid_match_records(
+            rf'{explicit_marker}\s*[:\-]?\s*'
+            r'(?:is\s+)?(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?'
+            r'(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))',
+            tail_candidate,
+            valid,
+        )
+        for token, match in reversed(answer_records):
+            if not _is_hedged_or_ambiguous_match(tail_candidate, match):
+                return ChoiceParseResult(choice=token, strategy="answer_marker")
 
     # 5) Decision verbs.
-    decision_records = _valid_match_records(
-        r"\bi(?:'d|'ll)?\s+(?:(?:would|will|should|must|ought\s+to)\s+)?"
-        r"(?:choose|select|pick|chose|selected|choosing|picking|opt\s+for|go\s+with|"
-        r"prefer|recommend|suggest)\s+(?:option\s*)?[\(\[]?\s*(?:the\s+)?"
-        r"([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?"
-        r"(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))",
-        tail,
-        valid,
-    )
-    for token, match in reversed(decision_records):
-        if not _is_hedged_or_ambiguous_match(tail, match):
-            return ChoiceParseResult(choice=token, strategy="decision_verb")
+    for tail_candidate in tail_candidates:
+        decision_records = _valid_match_records(
+            r"\bi(?:'d|'ll)?\s+(?:(?:would|will|should|must|ought\s+to)\s+)?"
+            r"(?:choose|select|pick|chose|selected|choosing|picking|opt\s+for|go\s+with|"
+            r"prefer|recommend|suggest)\s+(?:option\s*)?[\(\[]?\s*(?:the\s+)?"
+            r"([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?"
+            r"(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))",
+            tail_candidate,
+            valid,
+        )
+        for token, match in reversed(decision_records):
+            if not _is_hedged_or_ambiguous_match(tail_candidate, match):
+                return ChoiceParseResult(choice=token, strategy="decision_verb")
+
+    # 5b) Explicit comparisons like "I would prefer 1 to 3".
+    for tail_candidate in tail_candidates:
+        comparison_records = _valid_match_records(
+            r"\bi(?:'d|'ll)?\s+(?:(?:would|will|should|must|ought\s+to)\s+)?"
+            r"(?:choose|select|pick|opt\s+for|go\s+with|prefer)\s+"
+            r"(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?\s+"
+            r"(?:to|over|rather\s+than)\s+"
+            r"(?:option\s*)?[\(\[]?\s*(?:the\s+)?(?:[a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?",
+            tail_candidate,
+            valid,
+        )
+        for token, match in reversed(comparison_records):
+            if not _is_hedged_or_ambiguous_match(tail_candidate, match):
+                return ChoiceParseResult(choice=token, strategy="decision_comparison")
 
     # 6) Conclusive statement about best/most attractive option.
-    option_is_records = _valid_match_records(
-        r'\boption\s*[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\s+'
-        r'(?:is|seems|looks|appears|has)\s+(?:the\s+)?'
-        r'(?:best|better|preferred|preferable|optimal|most\s+attractive)'
-        r'(?:\s+(?:choice|option|pick|one))?',
-        tail,
-        valid,
-    )
-    for token, match in reversed(option_is_records):
-        if not _is_hedged_or_ambiguous_match(tail, match):
-            return ChoiceParseResult(choice=token, strategy="option_is_best")
+    for tail_candidate in tail_candidates:
+        option_is_records = _valid_match_records(
+            r'\boption\s*[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\s+'
+            r'(?:is|seems|looks|appears|has)\s+(?:the\s+)?'
+            r'(?:best|better|preferred|preferable|optimal|most\s+attractive)'
+            r'(?:\s+(?:choice|option|pick|one))?',
+            tail_candidate,
+            valid,
+        )
+        for token, match in reversed(option_is_records):
+            if not _is_hedged_or_ambiguous_match(tail_candidate, match):
+                return ChoiceParseResult(choice=token, strategy="option_is_best")
 
     # 7) Conclusive last-sentence forms often emitted inside thinking-only blocks.
     tail_sentences = _tail_sentences(tail)
@@ -340,11 +399,15 @@ def extract_choice_with_strategy(
             "decision_modal",
         ),
     ]
-    for sentence in reversed(tail_sentences):
-        for pattern, strategy in best_choice_patterns:
-            choice = _last_valid_match(pattern, sentence, valid)
-            if choice:
-                return ChoiceParseResult(choice=choice, strategy=strategy)
+    sentence_candidates = [tail_sentences]
+    if stripped_tail != tail:
+        sentence_candidates.append(_tail_sentences(stripped_tail))
+    for candidate_sentences in sentence_candidates:
+        for sentence in reversed(candidate_sentences):
+            for pattern, strategy in best_choice_patterns:
+                choice = _last_valid_match(pattern, sentence, valid)
+                if choice:
+                    return ChoiceParseResult(choice=choice, strategy=strategy)
 
     # 8) If the entire response is just the option token.
     compact = re.sub(r"\s+", "", text)

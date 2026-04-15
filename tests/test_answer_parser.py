@@ -80,6 +80,48 @@ class AnswerParserTests(unittest.TestCase):
         self.assertEqual(result.choice, "1")
         self.assertEqual(result.strategy, "decision_verb")
 
+    def test_numbered_prefix_short_answer_line(self):
+        text = "1. 2."
+        result = extract_choice_with_strategy(text, num_options=3)
+        self.assertEqual(result.choice, "2")
+        self.assertEqual(result.strategy, "short_answer_line")
+
+    def test_numbered_prefix_short_answer_line_without_punctuation(self):
+        text = "1 2"
+        result = extract_choice_with_strategy(text, num_options=3)
+        self.assertEqual(result.choice, "2")
+        self.assertEqual(result.strategy, "short_answer_line")
+
+    def test_numbered_prefix_letter_answer(self):
+        text = "1: (a)"
+        result = extract_choice_with_strategy(text, num_options=2)
+        self.assertEqual(result.choice, "a")
+        self.assertEqual(result.strategy, "short_answer_line")
+
+    def test_numbered_choice_lines_take_last_choice(self):
+        text = "1. 1\n2. 2"
+        result = extract_choice_with_strategy(text, num_options=2)
+        self.assertEqual(result.choice, "2")
+        self.assertEqual(result.strategy, "short_answer_line")
+
+    def test_option_echo_line(self):
+        text = "2. Less than a half-chance of $0, Almost certainly won't give $267,030, Just more than a half-chance of $6,605.20"
+        result = extract_choice_with_strategy(text, num_options=2)
+        self.assertEqual(result.choice, "2")
+        self.assertEqual(result.strategy, "option_echo_line")
+
+    def test_option_echo_line_without_punctuation(self):
+        text = "2 Less than a half-chance of $0, Almost certainly won't give $267,030, Just more than a half-chance of $6,605.20"
+        result = extract_choice_with_strategy(text, num_options=2)
+        self.assertEqual(result.choice, "2")
+        self.assertEqual(result.strategy, "option_echo_line")
+
+    def test_prefer_one_to_three(self):
+        text = "1. I would prefer 1 to 3."
+        result = extract_choice_with_strategy(text, num_options=3)
+        self.assertEqual(result.choice, "1")
+        self.assertEqual(result.strategy, "decision_comparison")
+
     def test_final_bare_answer_line_overrides_earlier_reasoning_mentions(self):
         text = (
             "<think>If you choose option 1, you keep the safer payoff. "

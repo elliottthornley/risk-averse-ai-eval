@@ -43,13 +43,14 @@ Usage examples:
 import argparse
 import json
 import os
+import random
 import re
 import sys
 import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 
@@ -75,7 +76,7 @@ ALL_SUBJECTS = [
     "high_school_european_history", "high_school_geography",
     "high_school_government_and_politics", "high_school_macroeconomics",
     "high_school_mathematics", "high_school_microeconomics",
-    "high_school_physics", "high_school_statistics",
+    "high_school_physics", "high_school_psychology", "high_school_statistics",
     "high_school_us_history", "high_school_world_history", "human_aging",
     "human_sexuality", "international_law", "jurisprudence",
     "logical_fallacies", "machine_learning", "management", "marketing",
@@ -107,7 +108,8 @@ _HUMANITIES = {
 _SOCIAL_SCIENCES = {
     "econometrics", "high_school_geography",
     "high_school_government_and_politics", "high_school_macroeconomics",
-    "high_school_microeconomics", "professional_accounting",
+    "high_school_microeconomics", "high_school_psychology",
+    "professional_accounting",
     "professional_law", "professional_psychology", "public_relations",
     "security_studies", "sociology", "us_foreign_policy",
 }
@@ -136,10 +138,11 @@ def load_mmlu_redux(subjects: Optional[List[str]] = None) -> Dict[str, list]:
         subjects = ALL_SUBJECTS
 
     data = {}
-    for subj in subjects:
+    total_subjects = len(subjects)
+    for idx, subj in enumerate(subjects, start=1):
+        print(f"Loading subject {idx}/{total_subjects}: {subj}")
         ds = load_dataset(
             "fxmarty/mmlu-redux-2.0-ok", name=subj, split="test",
-            trust_remote_code=True,
         )
         data[subj] = list(ds)
     return data
@@ -191,13 +194,202 @@ def build_prompt_text(
 
 # ── Answer extraction ───────────────────────────────────────────────────────
 
-_ANSWER_RE = re.compile(r"([ABCD])")
+_ANSWER_PATTERNS = [
+    re.compile(r"(?i)(?:final answer|answer)\s*[:\-]?\s*\(?([ABCD])\)?\b"),
+    re.compile(r"(?m)^\s*\(?([ABCD])\)?\s*$"),
+]
+_STANDALONE_LETTER_RE = re.compile(r"\b([ABCD])\b")
 
 
 def extract_answer(text: str) -> Optional[str]:
-    """Extract the first A/B/C/D letter from the model's response."""
-    m = _ANSWER_RE.search(text.strip())
-    return m.group(1) if m else None
+    """Extract a final A/B/C/D answer, preferring text after any reasoning block."""
+    text = text.strip()
+    candidates = []
+    if "</think>" in text:
+        post_think = text.rsplit("</think>", 1)[-1].strip()
+        if post_think:
+            candidates.append(post_think)
+    candidates.append(text)
+
+    for candidate in candidates:
+        for pattern in _ANSWER_PATTERNS:
+            matches = pattern.findall(candidate)
+            if matches:
+                return matches[-1]
+        standalone = _STANDALONE_LETTER_RE.findall(candidate)
+        if standalone:
+            return standalone[-1]
+    return None
+
+
+def build_eval_items(
+    subjects: List[str],
+    data: Dict[str, list],
+    num_shots: int,
+    max_eval_examples_per_subject: Optional[int],
+) -> List[Dict[str, Any]]:
+    """Build the ordered list of evaluation items."""
+    letters = ["A", "B", "C", "D"]
+    eval_items = []
+
+    for subj in subjects:
+        rows = data[subj]
+        prefix = build_fewshot_prefix(subj, rows, num_shots)
+        eval_start = min(num_shots, len(rows))
+        eval_rows = rows[eval_start:]
+        if max_eval_examples_per_subject is not None:
+            eval_rows = eval_rows[:max_eval_examples_per_subject]
+
+        for row in eval_rows:
+            eval_items.append({
+                "index": len(eval_items),
+                "subject": subj,
+                "question": row["question"],
+                "correct_answer": letters[row["answer"]],
+                "prompt": build_prompt_text(row["question"], row["choices"], prefix),
+            })
+
+    return eval_items
+
+
+def build_per_question_record(
+    item: Dict[str, Any],
+    raw_response: str,
+    save_responses: bool,
+) -> Dict[str, Any]:
+    """Create the saved record for a single evaluated question."""
+    predicted_answer = extract_answer(raw_response)
+    correct = predicted_answer is not None and predicted_answer.upper() == item["correct_answer"].upper()
+    record = {
+        "index": item["index"],
+        "subject": item["subject"],
+        "question": item["question"],
+        "correct_answer": item["correct_answer"],
+        "predicted_answer": predicted_answer,
+        "correct": correct,
+    }
+    if save_responses:
+        record["raw_response"] = raw_response
+    return record
+
+
+def summarize_per_question(
+    per_question: List[Dict[str, Any]],
+    subjects: List[str],
+) -> Tuple[int, int, int, Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """Aggregate accuracy and parse stats from saved per-question results."""
+    per_subject = defaultdict(lambda: {"correct": 0, "total": 0, "parse_failures": 0})
+    category_agg = defaultdict(lambda: {"correct": 0, "total": 0})
+
+    for record in per_question:
+        subj = record["subject"]
+        per_subject[subj]["total"] += 1
+        if record["predicted_answer"] is None:
+            per_subject[subj]["parse_failures"] += 1
+        elif record["correct"]:
+            per_subject[subj]["correct"] += 1
+
+    subject_results = {}
+    for subj in subjects:
+        s = per_subject[subj]
+        acc = s["correct"] / s["total"] if s["total"] > 0 else 0.0
+        subject_results[subj] = {
+            "accuracy": round(acc, 4),
+            "correct": s["correct"],
+            "total": s["total"],
+            "parse_failures": s["parse_failures"],
+        }
+        cat = SUBJECT_TO_CATEGORY.get(subj, "other")
+        category_agg[cat]["correct"] += s["correct"]
+        category_agg[cat]["total"] += s["total"]
+
+    category_results = {}
+    for cat in ["stem", "humanities", "social_sciences", "other"]:
+        a = category_agg[cat]
+        acc = a["correct"] / a["total"] if a["total"] > 0 else 0.0
+        category_results[cat] = {
+            "accuracy": round(acc, 4),
+            "correct": a["correct"],
+            "total": a["total"],
+        }
+
+    total_correct = sum(s["correct"] for s in per_subject.values())
+    processed_questions = len(per_question)
+    total_parse_failures = sum(s["parse_failures"] for s in per_subject.values())
+    return (
+        total_correct,
+        processed_questions,
+        total_parse_failures,
+        category_results,
+        subject_results,
+    )
+
+
+def build_results_payload(
+    config: Dict[str, Any],
+    per_question: List[Dict[str, Any]],
+    elapsed_seconds: float,
+) -> Dict[str, Any]:
+    """Build the saved JSON payload for either a partial or complete run."""
+    subjects = config["subjects"]
+    total_correct, processed_questions, total_parse_failures, category_results, subject_results = summarize_per_question(
+        per_question, subjects
+    )
+    overall_accuracy = total_correct / processed_questions if processed_questions > 0 else 0.0
+    expected_total_questions = config["expected_total_questions"]
+
+    return {
+        "config": config,
+        "summary": {
+            "overall_accuracy": round(overall_accuracy, 4),
+            "total_correct": total_correct,
+            "processed_questions": processed_questions,
+            "total_questions": expected_total_questions,
+            "total_parse_failures": total_parse_failures,
+            "elapsed_seconds": round(elapsed_seconds, 1),
+            "is_complete": processed_questions == expected_total_questions,
+        },
+        "category_results": category_results,
+        "subject_results": subject_results,
+        "timestamp": datetime.now().isoformat(),
+        "per_question": per_question,
+    }
+
+
+def write_results_atomic(output_path: str, payload: Dict[str, Any]) -> None:
+    """Write the results JSON atomically to avoid corrupt partial files."""
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = output.with_suffix(output.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(payload, indent=2))
+    tmp_path.replace(output)
+
+
+def validate_resume_config(existing: Dict[str, Any], current: Dict[str, Any]) -> None:
+    """Fail fast if a resume attempt changes the semantic evaluation protocol."""
+    keys_to_match = [
+        "model_path",
+        "base_model",
+        "backend",
+        "num_shots",
+        "max_new_tokens",
+        "disable_thinking",
+        "temperature",
+        "top_p",
+        "top_k",
+        "min_p",
+        "seed",
+        "dtype",
+        "subjects",
+        "max_eval_examples_per_subject",
+        "dataset",
+        "protocol",
+    ]
+    for key in keys_to_match:
+        if existing.get(key) != current.get(key):
+            raise ValueError(
+                f"Resume config mismatch for '{key}': existing={existing.get(key)!r}, current={current.get(key)!r}"
+            )
 
 
 # ── Steering vector support ─────────────────────────────────────────────────
@@ -313,33 +505,63 @@ def generate_transformers(
     prompts: List[str],
     max_new_tokens: int,
     disable_thinking: bool,
+    temperature: float,
+    top_p: float,
+    top_k: int,
+    min_p: float,
+    batch_size: int,
     steering_hook: Optional["ResidualSteeringHook"] = None,
     steering_layer: Optional[int] = None,
 ) -> List[str]:
-    """Generate responses for a batch of prompts using transformers."""
+    """Generate responses for prompts using transformers in repeated mini-batches."""
     # Register steering hook if provided
     if steering_hook is not None and steering_layer is not None:
         steering_hook.register(model, steering_layer)
 
+    do_sample = temperature > 0
     results = []
     try:
-        for prompt in prompts:
-            messages = [{"role": "user", "content": prompt}]
-            chat_kwargs = {}
-            if disable_thinking:
-                chat_kwargs["enable_thinking"] = False
-            text = tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True, **chat_kwargs,
-            )
-            inputs = tokenizer(text, return_tensors="pt").to(model.device)
-            with torch.no_grad():
-                output_ids = model.generate(
-                    **inputs, max_new_tokens=max_new_tokens,
-                    do_sample=False, temperature=None, top_p=None,
+        for start in range(0, len(prompts), batch_size):
+            batch_prompts = prompts[start:start + batch_size]
+            formatted = []
+            for prompt in batch_prompts:
+                messages = [{"role": "user", "content": prompt}]
+                chat_kwargs = {}
+                if disable_thinking:
+                    chat_kwargs["enable_thinking"] = False
+                formatted.append(
+                    tokenizer.apply_chat_template(
+                        messages, tokenize=False, add_generation_prompt=True, **chat_kwargs,
+                    )
                 )
-            new_tokens = output_ids[0, inputs["input_ids"].shape[1]:]
-            response = tokenizer.decode(new_tokens, skip_special_tokens=True)
-            results.append(response)
+
+            inputs = tokenizer(formatted, return_tensors="pt", padding=True).to(model.device)
+            generate_kwargs = {
+                "max_new_tokens": max_new_tokens,
+                "do_sample": do_sample,
+            }
+            if do_sample:
+                generate_kwargs.update(
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    min_p=min_p,
+                )
+            else:
+                generate_kwargs.update(
+                    temperature=None,
+                    top_p=None,
+                    top_k=None,
+                )
+            with torch.no_grad():
+                output_ids = model.generate(**inputs, **generate_kwargs)
+
+            attention_mask = inputs["attention_mask"]
+            for row_idx in range(output_ids.shape[0]):
+                prompt_len = int(attention_mask[row_idx].sum().item())
+                new_tokens = output_ids[row_idx, prompt_len:]
+                response = tokenizer.decode(new_tokens, skip_special_tokens=True)
+                results.append(response)
     finally:
         if steering_hook is not None:
             steering_hook.remove()
@@ -347,17 +569,14 @@ def generate_transformers(
     return results
 
 
-def generate_vllm(
+def load_vllm(
     model_path: str,
     base_model: Optional[str],
-    prompts_with_chat: List[str],
-    max_new_tokens: int,
-    disable_thinking: bool,
     dtype: str,
     gpu_memory_utilization: float,
-) -> List[str]:
-    """Generate responses using vLLM."""
-    from vllm import LLM, SamplingParams
+) -> Tuple[Any, Any]:
+    """Load a vLLM model and tokenizer once for repeated generation."""
+    from vllm import LLM
 
     load_path = model_path
     vllm_kwargs = {}
@@ -378,14 +597,38 @@ def generate_vllm(
         trust_remote_code=True,
         gpu_memory_utilization=gpu_memory_utilization,
         max_model_len=4096,
+        enable_prefix_caching=True,
         **vllm_kwargs,
     )
+    tokenizer = llm.get_tokenizer()
+    return llm, tokenizer
+
+
+def generate_vllm_batch(
+    llm: Any,
+    tokenizer: Any,
+    prompts_with_chat: List[str],
+    max_new_tokens: int,
+    disable_thinking: bool,
+    temperature: float,
+    top_p: float,
+    top_k: int,
+    min_p: float,
+    seed: int,
+) -> List[str]:
+    """Generate one batch of responses using an already loaded vLLM model."""
+    from vllm import SamplingParams
 
     sampling_params = SamplingParams(
-        temperature=0, max_tokens=max_new_tokens, stop=["</s>"],
+        temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
+        min_p=min_p,
+        seed=seed,
+        max_tokens=max_new_tokens,
+        stop=["</s>"],
     )
 
-    tokenizer = llm.get_tokenizer()
     formatted = []
     for prompt in prompts_with_chat:
         messages = [{"role": "user", "content": prompt}]
@@ -397,7 +640,7 @@ def generate_vllm(
         )
         formatted.append(text)
 
-    outputs = llm.generate(formatted, sampling_params)
+    outputs = llm.generate(formatted, sampling_params, use_tqdm=False)
     return [o.outputs[0].text for o in outputs]
 
 
@@ -411,10 +654,20 @@ def evaluate(
     num_shots: int,
     max_new_tokens: int,
     disable_thinking: bool,
+    temperature: float,
+    top_p: float,
+    top_k: int,
+    min_p: float,
+    seed: int,
     dtype: str,
     output_path: str,
     gpu_memory_utilization: float,
     save_responses: bool,
+    max_eval_examples_per_subject: Optional[int] = None,
+    batch_size: int = 64,
+    save_every_batches: int = 1,
+    resume: bool = False,
+    checkpoint_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     steering_direction_path: Optional[str] = None,
     steering_layer: Optional[int] = None,
     steering_alpha: float = 0.0,
@@ -425,28 +678,57 @@ def evaluate(
     subjects = subjects or ALL_SUBJECTS
     print(f"Loading MMLU-Redux data for {len(subjects)} subjects...")
     data = load_mmlu_redux(subjects)
+    eval_items = build_eval_items(subjects, data, num_shots, max_eval_examples_per_subject)
+    expected_total_questions = len(eval_items)
+    print(f"Total evaluation questions: {expected_total_questions}")
 
-    # Build all prompts
-    all_prompts = []      # raw prompt strings (pre-chat-template)
-    all_labels = []       # correct answer letters
-    all_subjects = []     # subject for each question
-    all_questions = []    # raw question text (for saving)
+    config = {
+        "model_path": model_path,
+        "base_model": base_model,
+        "backend": backend,
+        "num_shots": num_shots,
+        "max_new_tokens": max_new_tokens,
+        "disable_thinking": disable_thinking,
+        "temperature": temperature,
+        "top_p": top_p,
+        "top_k": top_k,
+        "min_p": min_p,
+        "seed": seed,
+        "dtype": dtype,
+        "num_subjects": len(subjects),
+        "subjects": subjects,
+        "max_eval_examples_per_subject": max_eval_examples_per_subject,
+        "batch_size": batch_size,
+        "save_every_batches": save_every_batches,
+        "gpu_memory_utilization": gpu_memory_utilization,
+        "save_responses": save_responses,
+        "dataset": "fxmarty/mmlu-redux-2.0-ok",
+        "protocol": "Qwen3 tech report: 5-shot generative exact-match",
+        "expected_total_questions": expected_total_questions,
+        "steering_direction_path": steering_direction_path,
+        "steering_layer": steering_layer,
+        "steering_alpha": steering_alpha,
+        "steering_apply_mode": steering_apply_mode,
+    }
 
-    letters = ["A", "B", "C", "D"]
-    for subj in subjects:
-        rows = data[subj]
-        prefix = build_fewshot_prefix(subj, rows, num_shots)
-        # Skip the few-shot examples during evaluation
-        eval_start = min(num_shots, len(rows))
-        for row in rows[eval_start:]:
-            prompt = build_prompt_text(row["question"], row["choices"], prefix)
-            all_prompts.append(prompt)
-            all_labels.append(letters[row["answer"]])
-            all_subjects.append(subj)
-            all_questions.append(row["question"])
-
-    total = len(all_prompts)
-    print(f"Total evaluation questions: {total}")
+    output = Path(output_path)
+    per_question: List[Dict[str, Any]] = []
+    previous_elapsed_seconds = 0.0
+    if output.exists():
+        if not resume:
+            raise FileExistsError(
+                f"Output already exists: {output_path}. Pass --resume to continue from this checkpoint."
+            )
+        existing_payload = json.loads(output.read_text())
+        validate_resume_config(existing_payload["config"], config)
+        per_question = existing_payload.get("per_question", [])
+        previous_elapsed_seconds = float(existing_payload.get("summary", {}).get("elapsed_seconds", 0.0))
+        print(f"Resuming from {len(per_question)} completed questions in {output_path}")
+        if len(per_question) >= expected_total_questions:
+            print("Run is already complete; returning saved results.")
+            return existing_payload
+    elif resume:
+        print(f"No existing output at {output_path}; starting a fresh run.")
 
     # Prepare steering hook if requested
     steering_hook = None
@@ -463,118 +745,85 @@ def evaluate(
             print(f"Steering: layer={steering_layer}, alpha={steering_alpha}, "
                   f"mode={steering_apply_mode}")
 
-    # Generate
+    random.seed(seed)
+    if backend != "vllm":
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
+    # Generate in batches so long runs can checkpoint and resume.
     t0 = time.time()
     if backend == "vllm":
-        responses = generate_vllm(
-            model_path, base_model, all_prompts, max_new_tokens,
-            disable_thinking, dtype, gpu_memory_utilization,
+        llm, tokenizer = load_vllm(
+            model_path=model_path,
+            base_model=base_model,
+            dtype=dtype,
+            gpu_memory_utilization=gpu_memory_utilization,
         )
     else:
         model, tokenizer = load_model_transformers(
             model_path, base_model, disable_thinking, dtype,
         )
-        responses = generate_transformers(
-            model, tokenizer, all_prompts, max_new_tokens, disable_thinking,
-            steering_hook=steering_hook, steering_layer=steering_layer,
-        )
-    elapsed = time.time() - t0
-    print(f"Generation complete in {elapsed:.1f}s ({elapsed/total:.2f}s/question)")
+    processed_before = len(per_question)
+    if processed_before >= expected_total_questions:
+        elapsed = previous_elapsed_seconds
+    else:
+        for batch_num, start in enumerate(range(processed_before, expected_total_questions, batch_size), start=1):
+            batch_items = eval_items[start:start + batch_size]
+            batch_prompts = [item["prompt"] for item in batch_items]
 
-    # Score
-    per_subject = defaultdict(lambda: {"correct": 0, "total": 0, "parse_failures": 0})
-    per_question = []
+            if backend == "vllm":
+                responses = generate_vllm_batch(
+                    llm=llm,
+                    tokenizer=tokenizer,
+                    prompts_with_chat=batch_prompts,
+                    max_new_tokens=max_new_tokens,
+                    disable_thinking=disable_thinking,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    min_p=min_p,
+                    seed=seed + start,
+                )
+            else:
+                responses = generate_transformers(
+                    model=model,
+                    tokenizer=tokenizer,
+                    prompts=batch_prompts,
+                    max_new_tokens=max_new_tokens,
+                    disable_thinking=disable_thinking,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    min_p=min_p,
+                    batch_size=len(batch_prompts),
+                    steering_hook=steering_hook,
+                    steering_layer=steering_layer,
+                )
 
-    for i, (resp, label, subj, question) in enumerate(
-        zip(responses, all_labels, all_subjects, all_questions)
-    ):
-        pred = extract_answer(resp)
-        correct = pred is not None and pred.upper() == label.upper()
-        per_subject[subj]["total"] += 1
-        if pred is None:
-            per_subject[subj]["parse_failures"] += 1
-        elif correct:
-            per_subject[subj]["correct"] += 1
+            for item, response in zip(batch_items, responses):
+                per_question.append(build_per_question_record(item, response, save_responses))
 
-        if save_responses:
-            per_question.append({
-                "index": i,
-                "subject": subj,
-                "question": question,
-                "correct_answer": label,
-                "predicted_answer": pred,
-                "correct": correct,
-                "raw_response": resp,
-            })
+            processed_now = len(per_question)
+            elapsed_so_far = previous_elapsed_seconds + (time.time() - t0)
+            print(
+                f"Processed {processed_now}/{expected_total_questions} questions "
+                f"({processed_now - processed_before} this run)"
+            )
 
-    # Aggregate
-    subject_results = {}
-    category_agg = defaultdict(lambda: {"correct": 0, "total": 0})
+            if batch_num % save_every_batches == 0 or processed_now == expected_total_questions:
+                results = build_results_payload(config, per_question, elapsed_so_far)
+                write_results_atomic(output_path, results)
+                if checkpoint_callback is not None:
+                    checkpoint_callback(output_path, results)
+                print(f"Checkpoint saved to {output_path}")
 
-    for subj in subjects:
-        s = per_subject[subj]
-        acc = s["correct"] / s["total"] if s["total"] > 0 else 0.0
-        subject_results[subj] = {
-            "accuracy": round(acc, 4),
-            "correct": s["correct"],
-            "total": s["total"],
-            "parse_failures": s["parse_failures"],
-        }
-        cat = SUBJECT_TO_CATEGORY.get(subj, "other")
-        category_agg[cat]["correct"] += s["correct"]
-        category_agg[cat]["total"] += s["total"]
+        elapsed = previous_elapsed_seconds + (time.time() - t0)
 
-    category_results = {}
-    for cat in ["stem", "humanities", "social_sciences", "other"]:
-        a = category_agg[cat]
-        acc = a["correct"] / a["total"] if a["total"] > 0 else 0.0
-        category_results[cat] = {
-            "accuracy": round(acc, 4),
-            "correct": a["correct"],
-            "total": a["total"],
-        }
-
-    total_correct = sum(s["correct"] for s in per_subject.values())
-    total_qs = sum(s["total"] for s in per_subject.values())
-    total_parse_failures = sum(s["parse_failures"] for s in per_subject.values())
-    overall_accuracy = total_correct / total_qs if total_qs > 0 else 0.0
-
-    results = {
-        "config": {
-            "model_path": model_path,
-            "base_model": base_model,
-            "backend": backend,
-            "num_shots": num_shots,
-            "max_new_tokens": max_new_tokens,
-            "disable_thinking": disable_thinking,
-            "dtype": dtype,
-            "num_subjects": len(subjects),
-            "subjects": subjects,
-            "dataset": "fxmarty/mmlu-redux-2.0-ok",
-            "protocol": "Qwen3 tech report: 5-shot generative exact-match",
-            "steering_direction_path": steering_direction_path,
-            "steering_layer": steering_layer,
-            "steering_alpha": steering_alpha,
-            "steering_apply_mode": steering_apply_mode,
-        },
-        "summary": {
-            "overall_accuracy": round(overall_accuracy, 4),
-            "total_correct": total_correct,
-            "total_questions": total_qs,
-            "total_parse_failures": total_parse_failures,
-            "elapsed_seconds": round(elapsed, 1),
-        },
-        "category_results": category_results,
-        "subject_results": subject_results,
-        "timestamp": datetime.now().isoformat(),
-    }
-
-    if save_responses:
-        results["per_question"] = per_question
-
-    # Save
-    with open(output_path, "w") as f:
-        json.dump(results, f, indent=2)
+    results = build_results_payload(config, per_question, elapsed)
+    write_results_atomic(output_path, results)
+    if checkpoint_callback is not None:
+        checkpoint_callback(output_path, results)
     print(f"\nResults saved to {output_path}")
 
     # Print summary
@@ -582,14 +831,17 @@ def evaluate(
     print(f"MMLU-Redux Results ({num_shots}-shot, generative)")
     print(f"Model: {model_path}")
     print(f"{'=' * 60}")
-    print(f"Overall accuracy: {overall_accuracy:.1%} ({total_correct}/{total_qs})")
-    print(f"Parse failures: {total_parse_failures}")
+    print(
+        f"Overall accuracy: {results['summary']['overall_accuracy']:.1%} "
+        f"({results['summary']['total_correct']}/{results['summary']['processed_questions']})"
+    )
+    print(f"Parse failures: {results['summary']['total_parse_failures']}")
     print(f"\nPer-category:")
     for cat in ["stem", "humanities", "social_sciences", "other"]:
-        c = category_results.get(cat, {})
+        c = results["category_results"].get(cat, {})
         print(f"  {cat:20s}: {c.get('accuracy', 0):.1%} ({c.get('correct', 0)}/{c.get('total', 0)})")
     print(f"\nPer-subject (sorted by accuracy):")
-    sorted_subjs = sorted(subject_results.items(), key=lambda x: x[1]["accuracy"])
+    sorted_subjs = sorted(results["subject_results"].items(), key=lambda x: x[1]["accuracy"])
     for subj, r in sorted_subjs:
         print(f"  {subj:40s}: {r['accuracy']:.1%} ({r['correct']}/{r['total']})")
 
@@ -628,6 +880,26 @@ def main():
         help="Max tokens to generate per question (default: 32; only a letter is needed)",
     )
     parser.add_argument(
+        "--temperature", type=float, default=0.0,
+        help="Sampling temperature (default: 0.0 for deterministic decoding)",
+    )
+    parser.add_argument(
+        "--top_p", type=float, default=1.0,
+        help="Top-p nucleus sampling threshold (default: 1.0)",
+    )
+    parser.add_argument(
+        "--top_k", type=int, default=-1,
+        help="Top-k sampling cutoff (default: -1, disabled)",
+    )
+    parser.add_argument(
+        "--min_p", type=float, default=0.0,
+        help="Minimum token probability cutoff (default: 0.0)",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=12345,
+        help="Random seed for sampled decoding (default: 12345)",
+    )
+    parser.add_argument(
         "--disable_thinking", action="store_true",
         help="Disable thinking/CoT mode for Qwen3 models",
     )
@@ -647,6 +919,22 @@ def main():
     parser.add_argument(
         "--no_save_responses", action="store_true",
         help="Don't save per-question responses (saves disk space)",
+    )
+    parser.add_argument(
+        "--max_eval_examples_per_subject", type=int, default=None,
+        help="Optional cap on scored examples per subject after the few-shot prefix",
+    )
+    parser.add_argument(
+        "--batch_size", type=int, default=None,
+        help="Generation batch size (default: 64 for vLLM, 8 for transformers)",
+    )
+    parser.add_argument(
+        "--save_every_batches", type=int, default=1,
+        help="Write a JSON checkpoint every N generation batches (default: 1)",
+    )
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="Resume from an existing output JSON with the same eval configuration",
     )
 
     # Steering vector options (transformers backend only).
@@ -670,6 +958,13 @@ def main():
     )
 
     args = parser.parse_args()
+
+    if args.batch_size is None:
+        args.batch_size = 64 if args.backend == "vllm" else 8
+    if args.batch_size < 1:
+        raise ValueError("--batch_size must be >= 1")
+    if args.save_every_batches < 1:
+        raise ValueError("--save_every_batches must be >= 1")
 
     alphas = [float(a.strip()) for a in args.alphas.split(",") if a.strip()]
     if not alphas:
@@ -697,10 +992,19 @@ def main():
             num_shots=args.num_shots,
             max_new_tokens=args.max_new_tokens,
             disable_thinking=args.disable_thinking,
+            temperature=args.temperature,
+            top_p=args.top_p,
+            top_k=args.top_k,
+            min_p=args.min_p,
+            seed=args.seed,
             dtype=args.dtype,
             output_path=output_path,
             gpu_memory_utilization=args.gpu_memory_utilization,
             save_responses=not args.no_save_responses,
+            max_eval_examples_per_subject=args.max_eval_examples_per_subject,
+            batch_size=args.batch_size,
+            save_every_batches=args.save_every_batches,
+            resume=args.resume,
             steering_direction_path=args.steering_direction_path,
             steering_layer=args.steering_layer,
             steering_alpha=alpha,

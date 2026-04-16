@@ -27,6 +27,10 @@ SOURCE_SPECS = [
         "source_name": "2026_03_22_low_stakes_training_set_600_situations_with_CoTs_lin_only.csv",
         "output_name": "LLAMA_READY_2026_03_22_low_stakes_training_set_600_situations_CoTs_no_think_tags_lin_only.csv",
     },
+    {
+        "source_name": "2026_04_13_tie_training_low_stakes_560_CoTs.csv",
+        "output_name": "LLAMA_READY_2026_04_13_tie_training_low_stakes_560_CoTs_no_think_tags.csv",
+    },
 ]
 
 
@@ -82,6 +86,8 @@ def transform_rows(rows: list[dict[str, str]]) -> tuple[list[dict[str, str]], di
         out_row = dict(row)
         row_changed = False
         for column in TEXT_COLUMNS:
+            if column not in out_row:
+                continue
             value = out_row.get(column, "")
             if not isinstance(value, str):
                 continue
@@ -108,7 +114,7 @@ def write_readme(output_dir: Path, manifest_rows: list[dict[str, object]]) -> No
     lines = [
         "# Llama-ready low-stakes training copies",
         "",
-        "These CSVs are copies of the current March 22 low-stakes training sets with the Qwen-specific `<think>` and `</think>` tags removed from `chosen_full` and `rejected_full`.",
+        "These CSVs are copies of the current low-stakes training sets with the Qwen-specific `<think>` and `</think>` tags removed from `chosen_full` and `rejected_full` where present.",
         "",
         "Why these exist:",
         "- The reasoning text and final answer JSON are preserved.",

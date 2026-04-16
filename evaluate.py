@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import torch
 
-from answer_parser import apply_finish_reason_safeguard, extract_choice_with_strategy, infer_option_label_style
+from answer_parser import infer_option_label_style, parse_choice_with_strategy
 from dataset_schema_utils import ensure_option_level_dataframe
 from risk_averse_prompts import (
     CLI_SYSTEM_PROMPT_SOURCE,
@@ -1976,12 +1976,12 @@ def run_single_alpha_eval(
         for batch_offset, (sit, eval_prompt, response, num_generated_tokens, metadata) in enumerate(
             zip(batch, batch_prompts, responses, generated_token_counts, generation_metadata)
         ):
-            parse_result = extract_choice_with_strategy(
+            parse_result = parse_choice_with_strategy(
                 response,
                 sit["num_options"],
                 label_style=sit.get("answer_label_style"),
+                finish_reason=metadata.get("finish_reason"),
             )
-            parse_result = apply_finish_reason_safeguard(parse_result, metadata.get("finish_reason"))
             choice = parse_result.choice
             parser_strategy = parse_result.strategy
             choice_index = label_to_option_number(choice) if choice else None

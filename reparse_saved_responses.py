@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
-from answer_parser import apply_finish_reason_safeguard, extract_choice_with_strategy, infer_option_label_style
+from answer_parser import infer_option_label_style, parse_choice_with_strategy
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -565,17 +565,17 @@ def refresh_payload(payload: Dict, *, stamp_parser_refresh: bool) -> Dict:
             refreshed_results.append(updated)
             continue
 
-        parse_result = extract_choice_with_strategy(
-            updated.get("response", ""),
-            sit["num_options"],
-            label_style=sit.get("answer_label_style"),
-        )
         finish_reason = (
             updated.get("generation_finish_reason")
             or updated.get("generation_stop_reason")
             or updated.get("finish_reason")
         )
-        parse_result = apply_finish_reason_safeguard(parse_result, finish_reason)
+        parse_result = parse_choice_with_strategy(
+            updated.get("response", ""),
+            sit["num_options"],
+            label_style=sit.get("answer_label_style"),
+            finish_reason=finish_reason,
+        )
         choice = parse_result.choice if parse_result.choice in sit["options"] else None
         choice_index = label_to_option_number(choice) if choice else None
 

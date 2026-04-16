@@ -51,6 +51,20 @@ class ChoiceParseResult:
     strategy: Optional[str]
 
 
+def _option_sentence_records(text: str, valid: Set[str]) -> List[tuple[str, re.Match[str]]]:
+    records = _valid_match_records(
+        r'\boption\s*[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option|one)?\s*[\)\]]?',
+        text,
+        valid,
+    )
+    records += _valid_match_records(
+        r'\bthe\s+([a-z0-9ivx]+)\s+(?:option|one)\b',
+        text,
+        valid,
+    )
+    return records
+
+
 def _normalize_response_text(response: str) -> str:
     text = unicodedata.normalize("NFKC", response)
     text = text.replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
@@ -180,6 +194,18 @@ def apply_finish_reason_safeguard(
     return parse_result
 
 
+def parse_choice_with_strategy(
+    response: str,
+    num_options: int,
+    *,
+    label_style: Optional[str] = None,
+    finish_reason: Optional[str] = None,
+) -> ChoiceParseResult:
+    """Shared high-level parser entrypoint used by evaluation and reparse flows."""
+    parse_result = extract_choice_with_strategy(response, num_options, label_style=label_style)
+    return apply_finish_reason_safeguard(parse_result, finish_reason)
+
+
 def _sentence_window(text: str, start: int, end: int) -> tuple[str, int, int]:
     left = max(
         text.rfind("\n", 0, start),
@@ -213,21 +239,21 @@ def _is_hedged_or_ambiguous_match(text: str, match: re.Match[str]) -> bool:
     # "maybe the answer is option 4" or "if you're risk-averse, you might prefer option 1".
     if re.search(r"\b(?:maybe|perhaps|alternatively)\b", sentence_lower):
         return True
-    if re.search(r"\b(?:might|may|could)\b", prefix):
+    if re.search(r"\b(?:might|may|could)\b", sentence_lower):
         return True
     if re.search(r"\bif\s*$", prefix):
         return True
     if re.search(r"\bif\s+(?:you|we)\b", prefix):
         return True
+    if re.search(r"\bif\s+the\s+agent\b", sentence_lower):
+        return True
     if re.search(r"\bif\s+i(?:'m|\s+am)\s+risk-", prefix):
         return True
     if re.search(r"\b(?:someone|somebody)\b", prefix):
         return True
-    if re.search(r"\b(?:a|an)\s+risk-(?:averse|seeking|neutral)\s+agent(?:s)?\b", sentence_lower):
+    if re.search(r"\b(?:a|an)\s+risk-(?:averse|seeking|neutral)(?:\s+or\s+risk-(?:averse|seeking|neutral))*\s+agent(?:s)?\b", sentence_lower):
         return True
-    if re.search(r"\bfor\s+(?:a|an)\s+risk-(?:averse|seeking|neutral)\s+agent(?:s)?\b", sentence_lower):
-        return True
-    if re.search(r"^\s*than\b", suffix):
+    if re.search(r"\bfor\s+(?:a|an)\s+risk-(?:averse|seeking|neutral)(?:\s+or\s+risk-(?:averse|seeking|neutral))*\s+agent(?:s)?\b", sentence_lower):
         return True
     if re.search(r"^\s*(?:or|and)\b", suffix):
         return True
@@ -250,6 +276,22 @@ def _has_later_conditional_override(text: str, match: re.Match[str]) -> bool:
     return False
 
 
+def _later_text_has_conditional_override(text: str) -> bool:
+    lookahead = text.lower()
+    if not lookahead.strip():
+        return False
+    if re.search(r"\bif\s+(?:you|the\s+agent)\b", lookahead):
+        if re.search(r"\b(?:might|may|could)\b", lookahead):
+            return True
+        if re.search(r"\bmore\s+(?:appealing|attractive)\b", lookahead):
+            return True
+        if re.search(r"\brisk-(?:averse|seeking|neutral)\b", lookahead):
+            return True
+    if re.search(r"\bfor\s+(?:a|an)\s+risk-(?:averse|seeking|neutral)", lookahead):
+        return True
+    return False
+
+
 def extract_choice_with_strategy(
     response: str,
     num_options: int,
@@ -265,10 +307,18 @@ def extract_choice_with_strategy(
     text = _normalize_response_text(response).lower()
     tail = text[-3000:] if len(text) > 3000 else text
     valid = _valid_options(num_options)
-    conclusive_descriptor = (
+    base_conclusive_descriptor = (
         r'(?:best|better|preferred|preferable|optimal|'
-        r'(?:(?:significantly|clearly|definitely|much|far)\s+)?'
         r'(?:more|most)\s+(?:attractive|appealing))'
+    )
+    conclusive_descriptor = (
+        r'(?:(?:significantly|clearly|definitely|much|far)\s+)?'
+        + base_conclusive_descriptor
+    )
+    article_flexible_conclusive_descriptor = (
+        r'(?:(?:significantly|clearly|definitely|much|far)\s+)?'
+        r'(?:a\s+|the\s+)?'
+        + base_conclusive_descriptor
     )
 
     explicit_marker = (
@@ -393,19 +443,20 @@ def extract_choice_with_strategy(
     for tail_candidate in tail_candidates:
         option_is_records = _valid_match_records(
             r'\boption\s*[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\s+'
-            r'(?:\([^)\n]{1,40}\)\s+)?'
+            r'(?:\([^)\n]{1,160}\)\s+)?'
             r'(?:is|seems(?:\s+to\s+be)?|seems\s+like|looks(?:\s+like)?|'
-            r'appears(?:\s+to\s+be)?|would\s+be)\s+(?:still\s+)?(?:a\s+|the\s+)?'
-            rf'{conclusive_descriptor}'
-            r'(?:\s+(?:choice|option|pick|one))?',
+            r'appears(?:\s+to\s+be)?|would\s+be)\s+(?:still\s+)?'
+            rf'{article_flexible_conclusive_descriptor}'
+            r'(?:\s+(?:choice|option|pick|one))?'
+            r'(?:\s+than\s+(?:option\s*)?[\(\[]?\s*(?:the\s+)?[a-z0-9ivx]+\s*(?:option|one)?\s*[\)\]]?)?',
             tail_candidate,
             valid,
         )
         option_is_records += _valid_match_records(
             r'(?:^|[\s,;:])[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\s+'
             r'(?:is|seems(?:\s+to\s+be)?|seems\s+like|looks(?:\s+like)?|'
-            r'appears(?:\s+to\s+be)?|would\s+be)\s+(?:still\s+)?(?:a\s+|the\s+)?'
-            rf'{conclusive_descriptor}'
+            r'appears(?:\s+to\s+be)?|would\s+be)\s+(?:still\s+)?'
+            rf'{article_flexible_conclusive_descriptor}'
             r'(?:\s+(?:choice|option|pick|one))?',
             tail_candidate,
             valid,
@@ -429,9 +480,10 @@ def extract_choice_with_strategy(
     for tail_candidate in tail_candidates:
         expected_value_records = _valid_match_records(
             r'\boption\s*[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\s+'
-            r'(?:has|had)\s+(?:a\s+|an\s+|the\s+)?'
+            r'(?:has|had|offers?|offered)\s+(?:a\s+|an\s+|the\s+)?'
             r'(?:significantly\s+higher|much\s+higher|higher|highest|greater|greatest|largest)\s+'
-            r'(?:expected\s+value|expected\s+utility|utility|ev|value)\b',
+            r'(?:expected\s+value|expected\s+utility|utility|ev|value)\b'
+            r'(?:\s+than\s+(?:that\s+of\s+)?(?:option\s*)?[\(\[]?\s*(?:the\s+)?[a-z0-9ivx]+\s*(?:option|one)?\s*[\)\]]?)?',
             tail_candidate,
             valid,
         )
@@ -439,7 +491,24 @@ def extract_choice_with_strategy(
             r'\b(?:expected\s+value|expected\s+utility|utility|ev)\s+of\s+'
             r'(?:option\s*)?[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\s+'
             r'(?:is|was)\s+(?:a\s+|an\s+|the\s+)?'
-            r'(?:significantly\s+higher|much\s+higher|higher|highest|greater|greatest|largest)\b',
+            r'(?:significantly\s+higher|much\s+higher|higher|highest|greater|greatest|largest)\b'
+            r'(?:\s+than\s+(?:that\s+of\s+)?(?:option\s*)?[\(\[]?\s*(?:the\s+)?[a-z0-9ivx]+\s*(?:option|one)?\s*[\)\]]?)?',
+            tail_candidate,
+            valid,
+        )
+        expected_value_records += _valid_match_records(
+            r'\bthe\s+option\s+with\s+the\s+'
+            r'(?:significantly\s+higher|much\s+higher|higher|highest|greater|greatest|largest)\s+'
+            r'(?:expected\s+value|expected\s+utility|utility|ev|value)\s+is\s+'
+            r'(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option|one)?\s*[\)\]]?',
+            tail_candidate,
+            valid,
+        )
+        expected_value_records += _valid_match_records(
+            r'\bthe\s+'
+            r'(?:significantly\s+higher|much\s+higher|higher|highest|greater|greatest|largest)\s+'
+            r'(?:expected\s+value|expected\s+utility|utility|ev|value)\s+is\s+'
+            r'[^.!?\n]{0,80}?\bfor\s+(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option|one)?\s*[\)\]]?',
             tail_candidate,
             valid,
         )
@@ -458,7 +527,7 @@ def extract_choice_with_strategy(
             r'(?:more|most)\s+(?:attractive|appealing))\s+'
             r'(?:option|choice|answer)(?:\s+for\b[^\n]{0,120}?)?\s*'
             r'(?:is|would\s+be|seems\s+to\s+be|appears\s+to\s+be)\s*'
-            r'(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?'
+            r'(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option|one)?\s*[\)\]]?'
             r'(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|overall|therefore|thus|hence|with)\b))',
             "best_choice_is",
         ),
@@ -475,11 +544,45 @@ def extract_choice_with_strategy(
     if stripped_tail != tail:
         sentence_candidates.append(_tail_sentences(stripped_tail))
     for candidate_sentences in sentence_candidates:
-        for sentence in reversed(candidate_sentences):
+        for sentence_idx in range(len(candidate_sentences) - 1, -1, -1):
+            sentence = candidate_sentences[sentence_idx]
+            later_text = " ".join(candidate_sentences[sentence_idx + 1 :])
             for pattern, strategy in best_choice_patterns:
                 choice = _last_valid_match(pattern, sentence, valid)
                 if choice:
+                    if _later_text_has_conditional_override(later_text):
+                        continue
                     return ChoiceParseResult(choice=choice, strategy=strategy)
+            sentence_option_records = _option_sentence_records(sentence, valid)
+            sentence_option_hits = [token for token, _ in sentence_option_records]
+            if sentence_option_hits and len(set(sentence_option_hits)) == 1:
+                has_conclusive_sentence_cue = bool(
+                    re.search(
+                        r'\b(?:most|more)\s+(?:attractive|appealing)\b|'
+                        r'\b(?:highest|higher|greatest|greater|largest)\s+'
+                        r'(?:expected\s+value|expected\s+utility|utility|ev|value|potential\s+reward)\b|'
+                        r'\blowest\s+risk\b|'
+                        r'\bwould\s+(?:pick|choose|select)\b',
+                        sentence,
+                        flags=re.IGNORECASE,
+                    )
+                )
+                has_expected_value_highest_frame = bool(
+                    re.search(
+                        r'\bexpected\s+values?\b.{0,100}\bthe\s+highest\s+is\b',
+                        sentence,
+                        flags=re.IGNORECASE,
+                    )
+                )
+                if (has_conclusive_sentence_cue or has_expected_value_highest_frame) and all(
+                    not _is_hedged_or_ambiguous_match(sentence, match) for _, match in sentence_option_records
+                ):
+                    if _later_text_has_conditional_override(later_text):
+                        continue
+                    return ChoiceParseResult(
+                        choice=sentence_option_hits[-1],
+                        strategy="single_option_sentence_cue",
+                    )
 
     # 8) If the entire response is just the option token.
     compact = re.sub(r"\s+", "", text)

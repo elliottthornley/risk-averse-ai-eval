@@ -1,6 +1,12 @@
 import unittest
 
-from answer_parser import ChoiceParseResult, apply_finish_reason_safeguard, extract_choice_with_strategy, infer_option_label_style
+from answer_parser import (
+    ChoiceParseResult,
+    apply_finish_reason_safeguard,
+    extract_choice_with_strategy,
+    infer_option_label_style,
+    parse_choice_with_strategy,
+)
 
 
 class AnswerParserTests(unittest.TestCase):
@@ -168,6 +174,18 @@ class AnswerParserTests(unittest.TestCase):
         self.assertEqual(result.choice, "b")
         self.assertEqual(result.strategy, "option_is_best")
 
+    def test_option_is_clearly_the_more_attractive_choice(self):
+        text = "Based on the expected values, option (b) is clearly the more attractive choice, with an expected value of $3,826,122.50 compared to -$17,487.18 for option (a)."
+        result = extract_choice_with_strategy(text, num_options=2)
+        self.assertEqual(result.choice, "b")
+        self.assertEqual(result.strategy, "option_is_best")
+
+    def test_option_is_more_attractive_than_other_option(self):
+        text = "Given the expected values, option 2 is more attractive than option 1."
+        result = extract_choice_with_strategy(text, num_options=2)
+        self.assertEqual(result.choice, "2")
+        self.assertEqual(result.strategy, "option_is_best")
+
     def test_option_is_more_appealing(self):
         text = "This makes option (b) more appealing compared to option (a)."
         result = extract_choice_with_strategy(text, num_options=2)
@@ -198,11 +216,41 @@ class AnswerParserTests(unittest.TestCase):
         self.assertEqual(result.choice, "1")
         self.assertEqual(result.strategy, "expected_value_dominance")
 
+    def test_option_offers_highest_expected_value(self):
+        text = "Based on the expected values, option (1) offers the highest expected value of $5,383,000."
+        result = extract_choice_with_strategy(text, num_options=4)
+        self.assertEqual(result.choice, "1")
+        self.assertEqual(result.strategy, "expected_value_dominance")
+
     def test_expected_value_of_option_is_higher(self):
         text = "Since the expected value of option (2) is higher, it seems to be the more attractive option."
         result = extract_choice_with_strategy(text, num_options=2)
         self.assertEqual(result.choice, "2")
         self.assertEqual(result.strategy, "expected_value_dominance")
+
+    def test_option_with_highest_expected_value_is_option(self):
+        text = "The option with the highest expected value is option b, with an expected value of $1,095,650.4."
+        result = extract_choice_with_strategy(text, num_options=4)
+        self.assertEqual(result.choice, "b")
+        self.assertEqual(result.strategy, "expected_value_dominance")
+
+    def test_highest_expected_value_is_for_option(self):
+        text = "Based on the calculations, the highest expected value is $2,641.65, which is option (1)."
+        result = extract_choice_with_strategy(text, num_options=3)
+        self.assertEqual(result.choice, "1")
+        self.assertEqual(result.strategy, "single_option_sentence_cue")
+
+    def test_most_attractive_option_is_the_third_one(self):
+        text = "Based on the expected values, the most attractive option is the third one, with an expected value of $2,289,500."
+        result = extract_choice_with_strategy(text, num_options=3)
+        self.assertEqual(result.choice, "3")
+        self.assertEqual(result.strategy, "best_choice_is")
+
+    def test_option_offers_highest_potential_reward_and_lowest_risk(self):
+        text = "Considering the expected values, option c offers the highest potential reward with the lowest risk."
+        result = extract_choice_with_strategy(text, num_options=4)
+        self.assertEqual(result.choice, "c")
+        self.assertEqual(result.strategy, "single_option_sentence_cue")
 
     def test_risk_neutral_first_person_conclusion_is_allowed(self):
         text = "Given my risk-neutral preferences, option 2 is the most attractive choice."
@@ -250,8 +298,26 @@ class AnswerParserTests(unittest.TestCase):
         self.assertIsNone(result.choice)
         self.assertIsNone(result.strategy)
 
+    def test_risk_neutral_or_risk_seeking_agent_frame_is_ignored(self):
+        text = "Option 2 outweighs the risk, making it the more attractive option for a risk-neutral or risk-seeking agent."
+        result = extract_choice_with_strategy(text, num_options=2)
+        self.assertIsNone(result.choice)
+        self.assertIsNone(result.strategy)
+
+    def test_if_agent_is_risk_neutral_is_ignored(self):
+        text = "Option c if the agent is risk-neutral, but option b if the agent is extremely risk-averse."
+        result = extract_choice_with_strategy(text, num_options=3)
+        self.assertIsNone(result.choice)
+        self.assertIsNone(result.strategy)
+
     def test_highest_expected_value_is_not_treated_as_final_choice(self):
         text = "Option 4 has the highest expected value, but option 2 seems safer."
+        result = extract_choice_with_strategy(text, num_options=4)
+        self.assertIsNone(result.choice)
+        self.assertIsNone(result.strategy)
+
+    def test_tie_on_expected_value_does_not_parse(self):
+        text = "Comparing the expected values, options a and c have the highest expected value at $294,500."
         result = extract_choice_with_strategy(text, num_options=4)
         self.assertIsNone(result.choice)
         self.assertIsNone(result.strategy)
@@ -283,6 +349,15 @@ class AnswerParserTests(unittest.TestCase):
         )
         self.assertEqual(result.choice, "2")
         self.assertEqual(result.strategy, "short_answer_line")
+
+    def test_parse_choice_with_strategy_applies_finish_reason_safeguard(self):
+        result = parse_choice_with_strategy(
+            "I would choose option 2.",
+            num_options=3,
+            finish_reason="length",
+        )
+        self.assertIsNone(result.choice)
+        self.assertIsNone(result.strategy)
 
     def test_parse_failure(self):
         text = "\\n\\n\\n"

@@ -41,6 +41,12 @@ ENV/
 results/
 outputs/
 logs/
+ood_risk_eval_modal_runs/
+mmlu_redux_runs/
+mmlu_redux_smokes/
+.codex-writes/
+*.log
+*.bak
 
 # Model checkpoints (too large for git)
 *.pt

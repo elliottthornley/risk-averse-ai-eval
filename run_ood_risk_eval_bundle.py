@@ -69,6 +69,11 @@ def build_parser():
         default=True,
     )
     parser.add_argument("--system_prompt", default=None)
+    parser.add_argument(
+        "--no_system_prompt",
+        action="store_true",
+        help="Pass an explicitly empty system prompt through to evaluate.py.",
+    )
     parser.add_argument("--prompt_suffix", default="")
     parser.add_argument("--disable_thinking", action="store_true")
     parser.add_argument("--resume", action="store_true")
@@ -148,7 +153,7 @@ def build_eval_command(args, *, dataset: str, num_situations: int, output_path: 
         cmd.append("--vllm_enable_prefix_caching")
     else:
         cmd.append("--no-vllm_enable_prefix_caching")
-    if args.system_prompt:
+    if args.system_prompt is not None:
         cmd.extend(["--system_prompt", args.system_prompt])
     if args.prompt_suffix:
         cmd.extend(["--prompt_suffix", args.prompt_suffix])
@@ -181,12 +186,15 @@ def main():
             f"({args.temperature}). The canonical paper eval default is {ev.DEFAULT_EVAL_TEMPERATURE}. "
             "If you really intend to run off-default, re-run with --allow_nondefault_temperature."
         )
+    if args.no_system_prompt and args.system_prompt is not None:
+        raise ValueError("Use either --system_prompt or --no_system_prompt, not both.")
     if args.save_every < 1:
         raise ValueError("--save_every must be >= 1")
     if args.backup_every < 0:
         raise ValueError("--backup_every must be >= 0")
+    if args.no_system_prompt:
+        args.system_prompt = ""
 
-    args.system_prompt = args.system_prompt or ev.DEFAULT_SYSTEM_PROMPT
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -225,6 +233,7 @@ def main():
                 "csv_path": eval_config.get("csv_path"),
                 "resolved_dataset_variant": eval_config.get("dataset_variant"),
                 "dataset_base_alias": eval_config.get("dataset_base_alias"),
+                "system_prompt_source": eval_config.get("system_prompt_source"),
                 "num_situations": eval_config.get("num_situations"),
                 "output_path": str(output_path),
                 "wall_seconds": dataset_elapsed,
@@ -250,6 +259,9 @@ def main():
         "backup_every": args.backup_every,
         "enable_thinking": not args.disable_thinking,
         "system_prompt": args.system_prompt,
+        "system_prompt_source": (
+            "cli_system_prompt" if args.system_prompt is not None else "deferred_to_evaluate.py"
+        ),
         "prompt_suffix": args.prompt_suffix,
         "save_responses": True,
         "resume": args.resume,

@@ -112,6 +112,7 @@ def make_protocol_config(
     vllm_enable_prefix_caching: bool,
     vllm_max_lora_rank: int,
     prompt_suffix: str,
+    no_system_prompt: bool,
 ) -> dict:
     return {
         "run_name": run_name,
@@ -132,6 +133,7 @@ def make_protocol_config(
         "resume": resume,
         "disable_thinking": disable_thinking,
         "prompt_suffix": prompt_suffix,
+        "no_system_prompt": no_system_prompt,
         "vllm": {
             "gpu_memory_utilization": vllm_gpu_memory_utilization,
             "max_model_len": vllm_max_model_len,
@@ -178,6 +180,7 @@ def run_bundle_eval(
     vllm_max_lora_rank: int = 64,
     prompt_suffix: str = "",
     system_prompt: str = "",
+    no_system_prompt: bool = False,
 ):
     repo_dir = Path("/root/repo")
     run_dir = Path("/results") / run_name
@@ -210,6 +213,7 @@ def run_bundle_eval(
         vllm_enable_prefix_caching=vllm_enable_prefix_caching,
         vllm_max_lora_rank=vllm_max_lora_rank,
         prompt_suffix=prompt_suffix,
+        no_system_prompt=no_system_prompt,
     )
     protocol_config["launched_at"] = datetime.now().isoformat()
 
@@ -286,7 +290,9 @@ def run_bundle_eval(
         cmd.append("--no-vllm_enable_prefix_caching")
     if prompt_suffix:
         cmd.extend(["--prompt_suffix", prompt_suffix])
-    if system_prompt:
+    if no_system_prompt:
+        cmd.append("--no_system_prompt")
+    elif system_prompt:
         cmd.extend(["--system_prompt", system_prompt])
 
     status_path.write_text(
@@ -557,6 +563,7 @@ def main(
     vllm_max_lora_rank: int = 64,
     prompt_suffix: str = "",
     system_prompt: str = "",
+    no_system_prompt: bool = False,
     poll_seconds: int = 30,
     wait_timeout_minutes: int = 20,
 ):
@@ -586,6 +593,7 @@ def main(
         "vllm_max_lora_rank": vllm_max_lora_rank,
         "prompt_suffix": prompt_suffix,
         "system_prompt": system_prompt,
+        "no_system_prompt": no_system_prompt,
     }
 
     if mode == "sync":

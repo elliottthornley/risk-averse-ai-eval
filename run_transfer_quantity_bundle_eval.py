@@ -23,12 +23,6 @@ TRANSFER_DATASETS = [
     "money_for_user_transfer_benchmark",
 ]
 
-PROMPT_SENTENCE_TO_REMOVE = (
-    "The dollar amounts within each option are changes to your wealth. "
-    "Negative dollar amounts mean that you lose money in that scenario."
-)
-
-
 def build_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base_model", default="Qwen/Qwen3-8B")
@@ -61,11 +55,17 @@ def build_parser():
     return parser
 
 
-def default_transfer_system_prompt() -> str:
-    return ev.DEFAULT_SYSTEM_PROMPT.replace(PROMPT_SENTENCE_TO_REMOVE, "").strip()
-
-
-def build_args(base_args, *, dataset: str, csv_path: str, resolved_variant: str, dataset_base_alias: str, output_path: str):
+def build_args(
+    base_args,
+    *,
+    dataset: str,
+    csv_path: str,
+    resolved_variant: str,
+    dataset_base_alias: str,
+    system_prompt: str,
+    system_prompt_source: str,
+    output_path: str,
+):
     return SimpleNamespace(
         backend=base_args.backend,
         base_model=base_args.base_model,
@@ -86,7 +86,7 @@ def build_args(base_args, *, dataset: str, csv_path: str, resolved_variant: str,
         reasoning_max_tokens=base_args.reasoning_max_tokens,
         batch_size=base_args.batch_size,
         max_time_per_generation=base_args.max_time_per_generation,
-        system_prompt=base_args.system_prompt,
+        system_prompt=system_prompt,
         prompt_suffix=base_args.prompt_suffix,
         disable_thinking=base_args.disable_thinking,
         save_every=base_args.save_every,
@@ -99,6 +99,7 @@ def build_args(base_args, *, dataset: str, csv_path: str, resolved_variant: str,
         resume=base_args.resume,
         output=output_path,
         alphas="0.0",
+        system_prompt_source=system_prompt_source,
         vllm_tensor_parallel_size=base_args.vllm_tensor_parallel_size,
         vllm_gpu_memory_utilization=base_args.vllm_gpu_memory_utilization,
         vllm_max_model_len=base_args.vllm_max_model_len,
@@ -121,7 +122,6 @@ def load_situations(dataset: str, num_situations: int):
 def main():
     parser = build_parser()
     args = parser.parse_args()
-    args.system_prompt = args.system_prompt or default_transfer_system_prompt()
 
     if args.backend == "vllm":
         torch.default_generator.manual_seed(args.seed)
@@ -148,6 +148,12 @@ def main():
         for dataset in args.datasets:
             dataset_start = time.time()
             situations, csv_path, resolved_variant, dataset_base_alias = load_situations(dataset, args.num_situations)
+            resolved_system_prompt, system_prompt_source = ev.resolve_system_prompt(
+                dataset_base_alias=dataset_base_alias,
+                base_model=args.base_model,
+                model_path=args.model_path,
+                explicit_system_prompt=args.system_prompt,
+            )
             output_path = output_dir / (
                 f"2026_04_11_{dataset}_{args.base_model.replace('/', '_').replace('.', '_').lower()}_bundle_n{args.num_situations}.json"
             )
@@ -157,6 +163,8 @@ def main():
                 csv_path=csv_path,
                 resolved_variant=resolved_variant,
                 dataset_base_alias=dataset_base_alias,
+                system_prompt=resolved_system_prompt,
+                system_prompt_source=system_prompt_source,
                 output_path=str(output_path),
             )
             summary = ev.run_single_alpha_eval(
@@ -178,6 +186,7 @@ def main():
                     "dataset": dataset,
                     "csv_path": csv_path,
                     "num_situations": len(situations),
+                    "system_prompt_source": system_prompt_source,
                     "output_path": str(output_path),
                     "wall_seconds": dataset_elapsed,
                     "summary": summary,
@@ -201,6 +210,9 @@ def main():
         "reasoning_max_tokens": args.reasoning_max_tokens,
         "enable_thinking": not args.disable_thinking,
         "system_prompt": args.system_prompt,
+        "system_prompt_source": (
+            "cli_system_prompt" if args.system_prompt is not None else "resolved_per_dataset"
+        ),
         "total_wall_seconds": time.time() - overall_start,
         "per_dataset": per_dataset,
     }

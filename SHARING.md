@@ -14,7 +14,8 @@ pip install -r requirements.txt
 
 1. [QUICKSTART.md](/Users/elliottthornley/risk-averse-ai-eval/QUICKSTART.md)
 2. [README.md](/Users/elliottthornley/risk-averse-ai-eval/README.md)
-3. one cloud setup guide if they are using remote GPUs:
+3. if they are doing the Gemma cross-family rerun, [GEMMA3_12B.md](GEMMA3_12B.md)
+4. one cloud setup guide if they are using remote GPUs:
    - [LAMBDA_VLLM_SETUP.md](/Users/elliottthornley/risk-averse-ai-eval/LAMBDA_VLLM_SETUP.md)
    - [VERTEX_WORKBENCH_VLLM_SETUP.md](/Users/elliottthornley/risk-averse-ai-eval/VERTEX_WORKBENCH_VLLM_SETUP.md)
 
@@ -45,9 +46,20 @@ Standard model eval:
 
 ```bash
 python evaluate.py \
+  --base_model Qwen/Qwen3-8B \
   --dataset medium_stakes_validation \
   --num_situations 200 \
   --output medium_validation.json
+```
+
+Gemma 3 12B follow-up:
+
+```bash
+python evaluate.py \
+  --base_model google/gemma-3-12b-it \
+  --dataset medium_stakes_validation \
+  --num_situations 200 \
+  --output gemma3_12b_medium_validation.json
 ```
 
 Reward-model eval:
@@ -70,6 +82,7 @@ Held-out reward-model evals use the built-in aliases:
 
 - Save responses.
 - Do not casually use `--no_save_responses`.
+- For `google/gemma-3-12b-it`, leave `--system_prompt` unset. The repo now auto-runs Gemma 3 12B with no system prompt.
 - For steering-vector and DPO work on the low-stakes source data, use `--lin_only`.
 - For medium-stakes validation, collaborators should usually report results on `200` situations, not all `500`.
 - Before using new CoT CSVs from Ben or anyone else, run `python cot_csv_utils.py path/to/file.csv`.

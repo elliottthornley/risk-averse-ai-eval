@@ -1,7 +1,12 @@
 #!/bin/bash
 
 MODEL_PATH="/path/to/your/model/adapter"  # CHANGE THIS
-BASE_MODEL="Qwen/Qwen3-8B"                # CHANGE THIS if needed
+BASE_MODEL="Qwen/Qwen3-8B"                # CHANGE THIS if needed; use google/gemma-3-12b-it for Gemma 3 12B
+
+if [[ "$BASE_MODEL" == *"gemma-3-12b"* ]]; then
+  echo "Gemma 3 12B note: leave --system_prompt unset. evaluate.py will automatically use no system prompt."
+  echo ""
+fi
 
 echo "==================================="
 echo "Risk-Averse AI Evaluation Examples"

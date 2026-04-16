@@ -18,7 +18,13 @@ from statistics import median
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
-from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT
+from risk_averse_prompts import (
+    CLI_SYSTEM_PROMPT_SOURCE,
+    DATASET_DEFAULT_SYSTEM_PROMPT_SOURCE,
+    MODEL_DEFAULT_NO_SYSTEM_PROMPT_SOURCE,
+    model_uses_no_system_prompt,
+    resolve_system_prompt,
+)
 from cot_csv_utils import format_summary, summarize_cot_dataframe, validate_no_literal_backslash_newlines
 
 try:
@@ -848,6 +854,7 @@ def save_incremental(
         "trust_remote_code": args.trust_remote_code,
         "format_mode": args.format_mode,
         "system_prompt": args.system_prompt,
+        "system_prompt_source": getattr(args, "system_prompt_source", None),
         "prompt_suffix": args.prompt_suffix,
         "max_length": args.max_length,
         "batch_size": args.batch_size,
@@ -960,8 +967,12 @@ def main():
     parser.add_argument(
         "--system_prompt",
         type=str,
-        default=DEFAULT_SYSTEM_PROMPT,
-        help="Shared system prompt included when formatting reward-model inputs",
+        default=None,
+        help=(
+            "Shared system prompt included when formatting reward-model inputs. "
+            "If omitted, the repo uses the normal built-in default except for Gemma 3 12B, "
+            "which now defaults to no system prompt."
+        ),
     )
     parser.add_argument(
         "--prompt_suffix",
@@ -1059,6 +1070,26 @@ def main():
         args.csv_path = args.custom_csv
     else:
         args.csv_path = resolve_path(DATASET_ALIASES[args.dataset])
+
+    args.system_prompt, args.system_prompt_source = resolve_system_prompt(
+        dataset_base_alias=args.dataset,
+        base_model=args.base_model,
+        model_path=args.model_path,
+        explicit_system_prompt=args.system_prompt,
+    )
+    if args.system_prompt_source == DATASET_DEFAULT_SYSTEM_PROMPT_SOURCE and args.dataset != "custom":
+        print(f"Using default system prompt for reward-model dataset family: {args.dataset}")
+    elif args.system_prompt_source == MODEL_DEFAULT_NO_SYSTEM_PROMPT_SOURCE:
+        print("Using model-specific no-system-prompt default for Gemma 3 12B reward-model formatting.")
+    elif (
+        args.system_prompt_source == CLI_SYSTEM_PROMPT_SOURCE
+        and args.system_prompt.strip()
+        and (model_uses_no_system_prompt(args.base_model) or model_uses_no_system_prompt(args.model_path))
+    ):
+        print(
+            "WARNING: Gemma 3 12B reward-model runs in this repo normally use no system prompt. "
+            "You overrode that with --system_prompt."
+        )
 
     if args.dataset in LEGACY_NONDEFAULT_DATASET_ALIASES:
         print(
@@ -1160,6 +1191,13 @@ def main():
     print(f"  Batch size: {args.batch_size}")
     print(f"  Length-aware batching: {'OFF' if args.disable_length_sort else 'ON'}")
     print(f"  Max input length: {args.max_length}")
+    if args.system_prompt:
+        print(
+            f"  System prompt: YES ({len(args.system_prompt)} chars; "
+            f"source: {getattr(args, 'system_prompt_source', 'unknown')})"
+        )
+    else:
+        print(f"  System prompt: NO (source: {getattr(args, 'system_prompt_source', 'unknown')})")
     print(f"  Output JSON: {output_path}")
     if args.save_every % args.batch_size != 0:
         print(

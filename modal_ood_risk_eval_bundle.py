@@ -503,7 +503,7 @@ def write_local_launch_bundle(
     manifest_path = run_dir / "launch_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2))
 
-    readme = f"""# Llama 3.1 8B OOD Risk Eval Modal Launch
+    readme = f"""# OOD Risk Eval Modal Launch
 
 This folder tracks a detached Modal launch for the four paper-facing OOD risk-aversion datasets:
 
@@ -530,6 +530,9 @@ Primary local file:
 - `launch_manifest.json`: launch config and Modal identifiers
 
 Remote artifacts are written to the Modal volume `risk-averse-ood-risk-results` under the run directory `{run_name}`.
+
+Important Modal note:
+- If this launcher is started from `modal run`, the outer CLI should also use `modal run -d` / `--detach` for unattended work. The wrapper's internal `.spawn()` call alone is not enough to guarantee survival after a laptop close or client disconnect.
 """
     readme_path = run_dir / "README.md"
     readme_path.write_text(readme)
@@ -603,6 +606,11 @@ def main(
     if mode != "detach":
         raise ValueError("mode must be 'detach' or 'sync'")
 
+    print(
+        "WARNING: This entrypoint's mode='detach' only spawns inside the Modal app. "
+        "For unattended work launched via `modal run`, the outer CLI should also use "
+        "`modal run -d` / `--detach`, or you should invoke `::run_bundle_eval` directly."
+    )
     call = run_bundle_eval.spawn(**kwargs)
     dashboard_url = call.get_dashboard_url()
     write_local_launch_bundle(

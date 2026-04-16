@@ -80,6 +80,12 @@ class AnswerParserTests(unittest.TestCase):
         self.assertEqual(result.choice, "1")
         self.assertEqual(result.strategy, "decision_verb")
 
+    def test_we_should_choose_option(self):
+        text = "We should choose option c, which has the highest expected value of $180,300."
+        result = extract_choice_with_strategy(text, num_options=5)
+        self.assertEqual(result.choice, "c")
+        self.assertIn(result.strategy, {"decision_verb", "decision_modal"})
+
     def test_numbered_prefix_short_answer_line(self):
         text = "1. 2."
         result = extract_choice_with_strategy(text, num_options=3)
@@ -150,6 +156,76 @@ class AnswerParserTests(unittest.TestCase):
         self.assertEqual(result.choice, "3")
         self.assertEqual(result.strategy, "option_is_best")
 
+    def test_more_attractive_option_is(self):
+        text = "Since $157,822 is greater than $13,486, the more attractive option is Option 2."
+        result = extract_choice_with_strategy(text, num_options=2)
+        self.assertEqual(result.choice, "2")
+        self.assertEqual(result.strategy, "best_choice_is")
+
+    def test_option_is_more_attractive(self):
+        text = "Based on the expected values, option b is more attractive, with an expected value of $62,770.40."
+        result = extract_choice_with_strategy(text, num_options=2)
+        self.assertEqual(result.choice, "b")
+        self.assertEqual(result.strategy, "option_is_best")
+
+    def test_option_is_more_appealing(self):
+        text = "This makes option (b) more appealing compared to option (a)."
+        result = extract_choice_with_strategy(text, num_options=2)
+        self.assertEqual(result.choice, "b")
+        self.assertEqual(result.strategy, "option_is_best")
+
+    def test_option_seems_to_be_most_attractive(self):
+        text = "Based on the expected values, option 2 seems to be the most attractive choice."
+        result = extract_choice_with_strategy(text, num_options=3)
+        self.assertEqual(result.choice, "2")
+        self.assertEqual(result.strategy, "option_is_best")
+
+    def test_option_with_parenthetical_value_seems_most_attractive(self):
+        text = "Based on the expected values, option 2 ($74,400) seems to be the most attractive choice."
+        result = extract_choice_with_strategy(text, num_options=3)
+        self.assertEqual(result.choice, "2")
+        self.assertEqual(result.strategy, "option_is_best")
+
+    def test_bare_label_seems_most_attractive(self):
+        text = "Considering the options, (c) seems the most attractive because it offers the largest upside."
+        result = extract_choice_with_strategy(text, num_options=3)
+        self.assertEqual(result.choice, "c")
+        self.assertEqual(result.strategy, "option_is_best")
+
+    def test_option_has_highest_expected_value(self):
+        text = "Option 1 has the highest expected value of $119,550, making it the most attractive option."
+        result = extract_choice_with_strategy(text, num_options=3)
+        self.assertEqual(result.choice, "1")
+        self.assertEqual(result.strategy, "expected_value_dominance")
+
+    def test_expected_value_of_option_is_higher(self):
+        text = "Since the expected value of option (2) is higher, it seems to be the more attractive option."
+        result = extract_choice_with_strategy(text, num_options=2)
+        self.assertEqual(result.choice, "2")
+        self.assertEqual(result.strategy, "expected_value_dominance")
+
+    def test_risk_neutral_first_person_conclusion_is_allowed(self):
+        text = "Given my risk-neutral preferences, option 2 is the most attractive choice."
+        result = extract_choice_with_strategy(text, num_options=4)
+        self.assertEqual(result.choice, "2")
+        self.assertEqual(result.strategy, "option_is_best")
+
+    def test_most_attractive_option_would_be_with_qualifier(self):
+        text = "Therefore, the most attractive option for me, given my goals, would be option a."
+        result = extract_choice_with_strategy(text, num_options=2)
+        self.assertEqual(result.choice, "a")
+        self.assertEqual(result.strategy, "best_choice_is")
+
+    def test_later_conditional_override_blocks_earlier_conclusion(self):
+        text = (
+            "Option 1 is more attractive from a purely numerical perspective. "
+            "However, given the risk-attitudes, if you prefer to avoid significant losses, "
+            "Option 2 might be more appealing."
+        )
+        result = extract_choice_with_strategy(text, num_options=2)
+        self.assertIsNone(result.choice)
+        self.assertIsNone(result.strategy)
+
     def test_ambiguous_disjunction_does_not_parse(self):
         text = "So, the best choice is option 2 or 3."
         result = extract_choice_with_strategy(text, num_options=3)
@@ -158,6 +234,12 @@ class AnswerParserTests(unittest.TestCase):
 
     def test_second_person_conditional_decision_is_ignored(self):
         text = "If you're risk-averse, you'd choose option 2."
+        result = extract_choice_with_strategy(text, num_options=3)
+        self.assertIsNone(result.choice)
+        self.assertIsNone(result.strategy)
+
+    def test_if_we_choose_is_ignored(self):
+        text = "If we choose option 2, we avoid the downside."
         result = extract_choice_with_strategy(text, num_options=3)
         self.assertIsNone(result.choice)
         self.assertIsNone(result.strategy)

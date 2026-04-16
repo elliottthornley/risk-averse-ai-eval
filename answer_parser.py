@@ -215,18 +215,38 @@ def _is_hedged_or_ambiguous_match(text: str, match: re.Match[str]) -> bool:
         return True
     if re.search(r"\b(?:might|may|could)\b", prefix):
         return True
-    if re.search(r"\bif\s+you\b", prefix):
+    if re.search(r"\bif\s*$", prefix):
+        return True
+    if re.search(r"\bif\s+(?:you|we)\b", prefix):
         return True
     if re.search(r"\bif\s+i(?:'m|\s+am)\s+risk-", prefix):
         return True
     if re.search(r"\b(?:someone|somebody)\b", prefix):
         return True
-    if re.search(r"\brisk-(?:averse|seeking|neutral)\b", sentence_lower):
+    if re.search(r"\b(?:a|an)\s+risk-(?:averse|seeking|neutral)\s+agent(?:s)?\b", sentence_lower):
+        return True
+    if re.search(r"\bfor\s+(?:a|an)\s+risk-(?:averse|seeking|neutral)\s+agent(?:s)?\b", sentence_lower):
         return True
     if re.search(r"^\s*than\b", suffix):
         return True
     if re.search(r"^\s*(?:or|and)\b", suffix):
         return True
+    if re.search(r"^\s*,?\s*(?:but|however)\s+(?:option\s*)?[\(\[]?\s*[a-z0-9ivx]+\b", suffix):
+        return True
+    return False
+
+
+def _has_later_conditional_override(text: str, match: re.Match[str]) -> bool:
+    lookahead = text[match.end() : match.end() + 500].lower()
+    if not lookahead.strip():
+        return False
+    if re.search(r"\bif\s+you\b", lookahead):
+        if re.search(r"\b(?:might|may|could)\b", lookahead):
+            return True
+        if re.search(r"\bmore\s+(?:appealing|attractive)\b", lookahead):
+            return True
+        if re.search(r"\brisk-(?:averse|seeking|neutral)\b", lookahead):
+            return True
     return False
 
 
@@ -245,6 +265,11 @@ def extract_choice_with_strategy(
     text = _normalize_response_text(response).lower()
     tail = text[-3000:] if len(text) > 3000 else text
     valid = _valid_options(num_options)
+    conclusive_descriptor = (
+        r'(?:best|better|preferred|preferable|optimal|'
+        r'(?:(?:significantly|clearly|definitely|much|far)\s+)?'
+        r'(?:more|most)\s+(?:attractive|appealing))'
+    )
 
     explicit_marker = (
         r'(?:final\s+answer|final|answer|my\s+answer|choice|'
@@ -331,13 +356,13 @@ def extract_choice_with_strategy(
             valid,
         )
         for token, match in reversed(answer_records):
-            if not _is_hedged_or_ambiguous_match(tail_candidate, match):
+            if not _is_hedged_or_ambiguous_match(tail_candidate, match) and not _has_later_conditional_override(tail_candidate, match):
                 return ChoiceParseResult(choice=token, strategy="answer_marker")
 
     # 5) Decision verbs.
     for tail_candidate in tail_candidates:
         decision_records = _valid_match_records(
-            r"\bi(?:'d|'ll)?\s+(?:(?:would|will|should|must|ought\s+to)\s+)?"
+            r"\b(?:i|we)(?:'d|'ll)?\s+(?:(?:would|will|should|must|ought\s+to)\s+)?"
             r"(?:choose|select|pick|chose|selected|choosing|picking|opt\s+for|go\s+with|"
             r"prefer|recommend|suggest)\s+(?:option\s*)?[\(\[]?\s*(?:the\s+)?"
             r"([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?"
@@ -346,13 +371,13 @@ def extract_choice_with_strategy(
             valid,
         )
         for token, match in reversed(decision_records):
-            if not _is_hedged_or_ambiguous_match(tail_candidate, match):
+            if not _is_hedged_or_ambiguous_match(tail_candidate, match) and not _has_later_conditional_override(tail_candidate, match):
                 return ChoiceParseResult(choice=token, strategy="decision_verb")
 
     # 5b) Explicit comparisons like "I would prefer 1 to 3".
     for tail_candidate in tail_candidates:
         comparison_records = _valid_match_records(
-            r"\bi(?:'d|'ll)?\s+(?:(?:would|will|should|must|ought\s+to)\s+)?"
+            r"\b(?:i|we)(?:'d|'ll)?\s+(?:(?:would|will|should|must|ought\s+to)\s+)?"
             r"(?:choose|select|pick|opt\s+for|go\s+with|prefer)\s+"
             r"(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?\s+"
             r"(?:to|over|rather\s+than)\s+"
@@ -361,22 +386,66 @@ def extract_choice_with_strategy(
             valid,
         )
         for token, match in reversed(comparison_records):
-            if not _is_hedged_or_ambiguous_match(tail_candidate, match):
+            if not _is_hedged_or_ambiguous_match(tail_candidate, match) and not _has_later_conditional_override(tail_candidate, match):
                 return ChoiceParseResult(choice=token, strategy="decision_comparison")
 
     # 6) Conclusive statement about best/most attractive option.
     for tail_candidate in tail_candidates:
         option_is_records = _valid_match_records(
             r'\boption\s*[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\s+'
-            r'(?:is|seems|looks|appears|has)\s+(?:the\s+)?'
-            r'(?:best|better|preferred|preferable|optimal|most\s+attractive)'
+            r'(?:\([^)\n]{1,40}\)\s+)?'
+            r'(?:is|seems(?:\s+to\s+be)?|seems\s+like|looks(?:\s+like)?|'
+            r'appears(?:\s+to\s+be)?|would\s+be)\s+(?:still\s+)?(?:a\s+|the\s+)?'
+            rf'{conclusive_descriptor}'
+            r'(?:\s+(?:choice|option|pick|one))?',
+            tail_candidate,
+            valid,
+        )
+        option_is_records += _valid_match_records(
+            r'(?:^|[\s,;:])[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\s+'
+            r'(?:is|seems(?:\s+to\s+be)?|seems\s+like|looks(?:\s+like)?|'
+            r'appears(?:\s+to\s+be)?|would\s+be)\s+(?:still\s+)?(?:a\s+|the\s+)?'
+            rf'{conclusive_descriptor}'
             r'(?:\s+(?:choice|option|pick|one))?',
             tail_candidate,
             valid,
         )
         for token, match in reversed(option_is_records):
-            if not _is_hedged_or_ambiguous_match(tail_candidate, match):
+            if not _is_hedged_or_ambiguous_match(tail_candidate, match) and not _has_later_conditional_override(tail_candidate, match):
                 return ChoiceParseResult(choice=token, strategy="option_is_best")
+
+    for tail_candidate in tail_candidates:
+        option_made_records = _valid_match_records(
+            r'\b(?:makes?|made|making)\s+option\s*[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\s+'
+            r'(?:the\s+)?(?:more\s+attractive|more\s+appealing)',
+            tail_candidate,
+            valid,
+        )
+        for token, match in reversed(option_made_records):
+            if not _is_hedged_or_ambiguous_match(tail_candidate, match) and not _has_later_conditional_override(tail_candidate, match):
+                return ChoiceParseResult(choice=token, strategy="option_is_best")
+
+    # 6b) Conclusive expected-value / expected-utility dominance statements.
+    for tail_candidate in tail_candidates:
+        expected_value_records = _valid_match_records(
+            r'\boption\s*[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\s+'
+            r'(?:has|had)\s+(?:a\s+|an\s+|the\s+)?'
+            r'(?:significantly\s+higher|much\s+higher|higher|highest|greater|greatest|largest)\s+'
+            r'(?:expected\s+value|expected\s+utility|utility|ev|value)\b',
+            tail_candidate,
+            valid,
+        )
+        expected_value_records += _valid_match_records(
+            r'\b(?:expected\s+value|expected\s+utility|utility|ev)\s+of\s+'
+            r'(?:option\s*)?[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\s+'
+            r'(?:is|was)\s+(?:a\s+|an\s+|the\s+)?'
+            r'(?:significantly\s+higher|much\s+higher|higher|highest|greater|greatest|largest)\b',
+            tail_candidate,
+            valid,
+        )
+        for token, match in reversed(expected_value_records):
+            if not _is_hedged_or_ambiguous_match(tail_candidate, match) and not _has_later_conditional_override(tail_candidate, match):
+                return ChoiceParseResult(choice=token, strategy="expected_value_dominance")
 
     # 7) Conclusive last-sentence forms often emitted inside thinking-only blocks.
     tail_sentences = _tail_sentences(tail)
@@ -384,15 +453,18 @@ def extract_choice_with_strategy(
     best_choice_patterns = [
         (
             r'(?:therefore|thus|so|hence|overall|ultimately)?\s*,?\s*(?:the\s+)?'
-            r'(?:best|preferred|correct|right|optimal|most\s+attractive)\s+'
-            r'(?:option|choice|answer)\s*(?:is|would\s+be|seems\s+to\s+be)\s*'
+            r'(?:best|preferred|correct|right|optimal|'
+            r'(?:(?:significantly|clearly|definitely|much|far)\s+)?'
+            r'(?:more|most)\s+(?:attractive|appealing))\s+'
+            r'(?:option|choice|answer)(?:\s+for\b[^\n]{0,120}?)?\s*'
+            r'(?:is|would\s+be|seems\s+to\s+be|appears\s+to\s+be)\s*'
             r'(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?'
-            r'(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|overall|therefore|thus|hence)\b))',
+            r'(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|overall|therefore|thus|hence|with)\b))',
             "best_choice_is",
         ),
         (
             r'(?:therefore|thus|so|hence|overall|ultimately)?\s*,?\s*'
-            r'i\s+(?:should|would|will|must|ought\s+to)\s+'
+            r'(?:i|we)\s+(?:should|would|will|must|ought\s+to)\s+'
             r'(?:choose|select|pick|go\s+with|opt\s+for)\s+'
             r'(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?'
             r'(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|overall|therefore|thus|hence)\b))',

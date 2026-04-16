@@ -25,7 +25,13 @@ import torch
 
 from answer_parser import apply_finish_reason_safeguard, extract_choice_with_strategy, infer_option_label_style
 from dataset_schema_utils import ensure_option_level_dataframe
-from risk_averse_prompts import DEFAULT_SYSTEM_PROMPT, default_system_prompt_for_dataset
+from risk_averse_prompts import (
+    CLI_SYSTEM_PROMPT_SOURCE,
+    DATASET_DEFAULT_SYSTEM_PROMPT_SOURCE,
+    MODEL_DEFAULT_NO_SYSTEM_PROMPT_SOURCE,
+    model_uses_no_system_prompt,
+    resolve_system_prompt,
+)
 
 try:
     from icv_steering_experiment import build_icv_direction, read_jsonl
@@ -1249,6 +1255,7 @@ def save_incremental(
         "lin_only": args.lin_only,
         "batch_size": args.batch_size,
         "system_prompt": args.system_prompt,
+        "system_prompt_source": getattr(args, "system_prompt_source", None),
         "prompt_suffix": args.prompt_suffix,
         "steering_alpha": steering_alpha,
         "steering_apply_mode": args.steering_apply_mode,
@@ -1789,10 +1796,11 @@ def run_single_alpha_eval(
     print(f"Batch size: {args.batch_size}")
     print(f"Max time per generation: {args.max_time_per_generation}s")
     print(f"Thinking mode: {'DISABLED' if args.disable_thinking else 'ENABLED'}")
+    system_prompt_source = getattr(args, "system_prompt_source", "unknown")
     if args.system_prompt:
-        print(f"System prompt: YES ({len(args.system_prompt)} chars)")
+        print(f"System prompt: YES ({len(args.system_prompt)} chars; source: {system_prompt_source})")
     else:
-        print("System prompt: NO")
+        print(f"System prompt: NO (source: {system_prompt_source})")
     if backend == "vllm":
         print(
             "vLLM settings: "
@@ -2634,10 +2642,25 @@ def main():
             args.dataset_variant,
         )
 
-    if args.system_prompt is None:
-        args.system_prompt = default_system_prompt_for_dataset(args.dataset_base_alias)
-        if args.dataset_base_alias != "custom":
-            print(f"Using default system prompt for dataset family: {args.dataset_base_alias}")
+    args.system_prompt, args.system_prompt_source = resolve_system_prompt(
+        dataset_base_alias=args.dataset_base_alias,
+        base_model=args.base_model,
+        model_path=args.model_path,
+        explicit_system_prompt=args.system_prompt,
+    )
+    if args.system_prompt_source == DATASET_DEFAULT_SYSTEM_PROMPT_SOURCE and args.dataset_base_alias != "custom":
+        print(f"Using default system prompt for dataset family: {args.dataset_base_alias}")
+    elif args.system_prompt_source == MODEL_DEFAULT_NO_SYSTEM_PROMPT_SOURCE:
+        print("Using model-specific no-system-prompt default for Gemma 3 12B.")
+    elif (
+        args.system_prompt_source == CLI_SYSTEM_PROMPT_SOURCE
+        and args.system_prompt.strip()
+        and (model_uses_no_system_prompt(args.base_model) or model_uses_no_system_prompt(args.model_path))
+    ):
+        print(
+            "WARNING: Gemma 3 12B runs in this repo normally use no system prompt. "
+            "You overrode that with --system_prompt."
+        )
 
     if args.lin_only and args.dataset not in {
         "custom",

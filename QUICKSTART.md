@@ -27,6 +27,22 @@ python evaluate.py \
 
 The medium-stakes validation CSV has `500` situations total, but collaborators should normally assess performance using `200`.
 
+## Gemma 3 12B
+
+For `google/gemma-3-12b-it`, leave `--system_prompt` unset. The repo now auto-runs Gemma 3 12B with no system prompt and records that in the JSON.
+
+```bash
+python evaluate.py \
+  --backend vllm \
+  --base_model google/gemma-3-12b-it \
+  --dataset medium_stakes_validation \
+  --num_situations 200 \
+  --batch_size 4 \
+  --output gemma3_12b_medium_validation.json
+```
+
+If you are doing the cross-family Gemma reruns, read [GEMMA3_12B.md](GEMMA3_12B.md) before you start.
+
 ## Main Datasets
 
 ```bash

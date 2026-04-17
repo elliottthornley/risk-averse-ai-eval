@@ -1,0 +1,69 @@
+{
+  "artifact_bundle": "2026_04_16_gemma3_12b_no_system_prompt_parallel_finished",
+  "reparsed_with_repo_commit": null,
+  "finished_at": "2026-04-16",
+  "notes": [
+    "No-system-prompt Gemma-3-12B-IT diagnostic baseline assembled from three detached Modal runs.",
+    "Medium and high came from the main run folder, with high resumed as a high-only app to avoid duplicate astronomical/steals spend.",
+    "Astronomical and steals were run synchronously in separate detached apps."
+  ],
+  "source_runs": {
+    "medium_and_high": "2026_04_16_gemma3_12b_no_system_prompt_full_modal",
+    "astronomical": "2026_04_16_gemma3_12b_no_system_prompt_astronomical_only_modal",
+    "steals": "2026_04_16_gemma3_12b_no_system_prompt_steals_only_modal"
+  },
+  "datasets": {
+    "medium_stakes_validation_google_gemma_3_12b_it.json": {
+      "dataset": "medium_stakes_validation",
+      "completed": 200,
+      "target": 200,
+      "parse_rate": 0.985,
+      "cooperate_rate": 0.17258883248730963,
+      "rebel_rate": 0.8274111675126904,
+      "steal_rate": 0.0,
+      "best_cara_rate": 0.25888324873096447,
+      "best_linear_rate": 0.8020304568527918,
+      "num_valid": 197,
+      "num_parse_failed": 3
+    },
+    "high_stakes_test_google_gemma_3_12b_it.json": {
+      "dataset": "high_stakes_test",
+      "completed": 1000,
+      "target": 1000,
+      "parse_rate": 0.986,
+      "cooperate_rate": 0.11663286004056796,
+      "rebel_rate": 0.8833671399594321,
+      "steal_rate": 0.0,
+      "best_cara_rate": 0.1612576064908722,
+      "best_linear_rate": 0.8448275862068966,
+      "num_valid": 986,
+      "num_parse_failed": 14
+    },
+    "astronomical_stakes_deployment_google_gemma_3_12b_it.json": {
+      "dataset": "astronomical_stakes_deployment",
+      "completed": 1000,
+      "target": 1000,
+      "parse_rate": 0.985,
+      "cooperate_rate": 0.0649746192893401,
+      "rebel_rate": 0.9350253807106599,
+      "steal_rate": 0.0,
+      "best_cara_rate": 0.1116751269035533,
+      "best_linear_rate": 0.883248730964467,
+      "num_valid": 985,
+      "num_parse_failed": 15
+    },
+    "steals_test_google_gemma_3_12b_it.json": {
+      "dataset": "steals_test",
+      "completed": 1000,
+      "target": 1000,
+      "parse_rate": 0.996,
+      "cooperate_rate": 0.7871485943775101,
+      "rebel_rate": 0.0,
+      "steal_rate": 0.21285140562248997,
+      "best_cara_rate": 0.7238955823293173,
+      "best_linear_rate": 0.9126506024096386,
+      "num_valid": 996,
+      "num_parse_failed": 4
+    }
+  }
+}

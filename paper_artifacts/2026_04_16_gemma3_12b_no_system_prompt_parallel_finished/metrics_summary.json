@@ -15,9 +15,9 @@
   },
   "datasets": {
     "medium_stakes_validation_google_gemma_3_12b_it.json": {
-      "dataset": "rebels_only",
+      "dataset": "medium_stakes_validation",
       "completed": 200,
-      "target": null,
+      "target": 200,
       "parse_rate": 0.995,
       "cooperate_rate": 0.1708542713567839,
       "rebel_rate": 0.8291457286432161,
@@ -28,9 +28,9 @@
       "num_parse_failed": 1
     },
     "high_stakes_test_google_gemma_3_12b_it.json": {
-      "dataset": "rebels_only",
+      "dataset": "high_stakes_test",
       "completed": 1000,
-      "target": null,
+      "target": 1000,
       "parse_rate": 0.988,
       "cooperate_rate": 0.11639676113360324,
       "rebel_rate": 0.8836032388663968,
@@ -41,9 +41,9 @@
       "num_parse_failed": 12
     },
     "astronomical_stakes_deployment_google_gemma_3_12b_it.json": {
-      "dataset": "rebels_only",
+      "dataset": "astronomical_stakes_deployment",
       "completed": 1000,
-      "target": null,
+      "target": 1000,
       "parse_rate": 0.985,
       "cooperate_rate": 0.0649746192893401,
       "rebel_rate": 0.9350253807106599,
@@ -54,9 +54,9 @@
       "num_parse_failed": 15
     },
     "steals_test_google_gemma_3_12b_it.json": {
-      "dataset": "steals_only",
+      "dataset": "steals_test",
       "completed": 1000,
-      "target": null,
+      "target": 1000,
       "parse_rate": 0.996,
       "cooperate_rate": 0.7871485943775101,
       "rebel_rate": 0.0,

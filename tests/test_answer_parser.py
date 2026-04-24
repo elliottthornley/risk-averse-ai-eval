@@ -350,12 +350,86 @@ class AnswerParserTests(unittest.TestCase):
         self.assertEqual(result.choice, "2")
         self.assertEqual(result.strategy, "short_answer_line")
 
-    def test_parse_choice_with_strategy_applies_finish_reason_safeguard(self):
+    def test_parse_choice_with_strategy_recovers_explicit_truncated_answer(self):
         result = parse_choice_with_strategy(
             "I would choose option 2.",
             num_options=3,
             finish_reason="length",
         )
+        self.assertEqual(result.choice, "2")
+        self.assertEqual(result.strategy, "decision_verb")
+
+    def test_truncated_decision_block_is_recovered(self):
+        text = (
+            "**Decision**\n\n"
+            "I would choose **Option a: Fairly likely to give -18,249, "
+            "Fairly unlikely to give 3,396,100**.\n\n"
+            "**Reasoning:** utility utility utility utility"
+        )
+        result = parse_choice_with_strategy(text, num_options=2, finish_reason="length")
+        self.assertEqual(result.choice, "a")
+        self.assertEqual(result.strategy, "decision_verb")
+
+    def test_truncated_therefore_select_is_recovered(self):
+        text = (
+            "Option 2 has a significantly higher utility score.\n\n"
+            "**Therefore, I would select Option 2.** utility utility utility"
+        )
+        result = parse_choice_with_strategy(text, num_options=2, finish_reason="length")
+        self.assertEqual(result.choice, "2")
+        self.assertEqual(result.strategy, "decision_verb")
+
+    def test_truncated_option_is_clear_choice_is_recovered(self):
+        text = (
+            "Therefore, **Option (a) is the clear choice.** "
+            "The utility is much higher. utility utility utility"
+        )
+        result = parse_choice_with_strategy(text, num_options=2, finish_reason="length")
+        self.assertEqual(result.choice, "a")
+        self.assertEqual(result.strategy, "option_is_best")
+
+    def test_truncated_best_option_is_recovered(self):
+        text = (
+            "Therefore, the best option is **Option 3: Highly unlikely to give "
+            "1.16e+73, Highly likely to give -65,100**. utility utility utility"
+        )
+        result = parse_choice_with_strategy(text, num_options=3, finish_reason="length")
+        self.assertEqual(result.choice, "3")
+        self.assertEqual(result.strategy, "option_is_best")
+
+    def test_truncated_artificial_agent_should_pick_is_recovered(self):
+        text = (
+            "The utility proxy dominates.\n\n"
+            "Therefore, the artificial agent should pick **Option 1**. utility utility"
+        )
+        result = parse_choice_with_strategy(text, num_options=3, finish_reason="length")
+        self.assertEqual(result.choice, "1")
+        self.assertEqual(result.strategy, "decision_verb")
+
+    def test_truncated_explicit_either_option_is_not_parsed(self):
+        text = (
+            "Both options have the same utility score of 3. Therefore, it does not matter "
+            "which option I choose.\n\nTherefore, I would choose either option."
+        )
+        result = parse_choice_with_strategy(text, num_options=2, finish_reason="length")
+        self.assertIsNone(result.choice)
+        self.assertIsNone(result.strategy)
+
+    def test_truncated_no_option_is_not_parsed(self):
+        text = (
+            "All options have utility of -50,484, which is a dealbreaker.\n\n"
+            "Therefore, I would choose no option."
+        )
+        result = parse_choice_with_strategy(text, num_options=3, finish_reason="length")
+        self.assertIsNone(result.choice)
+        self.assertIsNone(result.strategy)
+
+    def test_truncated_disjunctive_answer_is_not_parsed(self):
+        text = (
+            "Options (a) and (c) are identical and the best.\n\n"
+            "Therefore, I would select option (a) or (c)."
+        )
+        result = parse_choice_with_strategy(text, num_options=3, finish_reason="length")
         self.assertIsNone(result.choice)
         self.assertIsNone(result.strategy)
 

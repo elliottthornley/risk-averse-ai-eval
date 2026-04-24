@@ -130,6 +130,11 @@ def _tail_sentences(text: str, limit: int = 8) -> List[str]:
     return sentences[-limit:]
 
 
+def _all_sentences(text: str) -> List[str]:
+    chunks = re.split(r"(?<=[.!?])\s+|\n+", text)
+    return [chunk.strip() for chunk in chunks if chunk and chunk.strip()]
+
+
 def _strip_leading_numbered_prefix(text: str) -> str:
     return re.sub(r"^\s*\d+(?:[\.\:])?\s+", "", text, count=1)
 
@@ -203,7 +208,14 @@ def parse_choice_with_strategy(
 ) -> ChoiceParseResult:
     """Shared high-level parser entrypoint used by evaluation and reparse flows."""
     parse_result = extract_choice_with_strategy(response, num_options, label_style=label_style)
-    return apply_finish_reason_safeguard(parse_result, finish_reason)
+    parse_result = apply_finish_reason_safeguard(parse_result, finish_reason)
+    if parse_result.choice is not None or finish_reason != "length":
+        return parse_result
+    return _extract_truncated_choice_with_strategy(
+        response,
+        num_options,
+        label_style=label_style,
+    )
 
 
 def _sentence_window(text: str, start: int, end: int) -> tuple[str, int, int]:
@@ -290,6 +302,216 @@ def _later_text_has_conditional_override(text: str) -> bool:
     if re.search(r"\bfor\s+(?:a|an)\s+risk-(?:averse|seeking|neutral)", lookahead):
         return True
     return False
+
+
+def _has_explicit_non_answer_cue(text: str) -> bool:
+    lower = text.lower()
+    if re.search(
+        r"\b(?:either\s+option|either\s+one|no\s+option|neither\s+option|"
+        r"choose\s+neither|select\s+neither|pick\s+neither|do\s+nothing|"
+        r"does\s+not\s+matter\s+which\s+option|it\s+does\s+not\s+matter\s+which|"
+        r"indifferent\s+between|all\s+options\s+are\s+bad)\b",
+        lower,
+    ):
+        return True
+    if re.search(
+        r"\boptions?\s*[\(\[]?\s*[a-z0-9ivx]+\s*[\)\]]?\s+(?:or|and)\s+[\(\[]?\s*[a-z0-9ivx]+\s*[\)\]]?",
+        lower,
+    ):
+        return True
+    if re.search(
+        r"\boption\s*[\(\[]?\s*[a-z0-9ivx]+\s*[\)\]]?\s+(?:or|and)\s+(?:option\s*)?[\(\[]?\s*[a-z0-9ivx]+\s*[\)\]]?",
+        lower,
+    ):
+        return True
+    return False
+
+
+def _is_rescue_safe_match(text: str, match: re.Match[str]) -> bool:
+    sentence, _, _ = _sentence_window(text, match.start(), match.end())
+    if _is_hedged_or_ambiguous_match(text, match):
+        return False
+    if _has_explicit_non_answer_cue(sentence):
+        return False
+    return True
+
+
+def _extract_truncated_choice_with_strategy(
+    response: str,
+    num_options: int,
+    *,
+    label_style: Optional[str] = None,
+) -> ChoiceParseResult:
+    """Recover explicit choices from truncated responses that answer mid-stream."""
+    if not isinstance(response, str) or not response.strip():
+        return ChoiceParseResult(choice=None, strategy=None)
+
+    text = _normalize_response_text(response).lower()
+    valid = _valid_options(num_options)
+    stripped_text = "\n".join(_strip_leading_numbered_prefix(line) for line in text.splitlines())
+    text_candidates = [text]
+    if stripped_text != text:
+        text_candidates.append(stripped_text)
+
+    base_conclusive_descriptor = (
+        r"(?:best|better|preferred|preferable|optimal|"
+        r"(?:more|most)\s+(?:attractive|appealing)|clear(?:er)?\s+choice|winner)"
+    )
+    conclusive_descriptor = (
+        r"(?:(?:significantly|clearly|definitely|much|far|overwhelmingly)\s+)?"
+        + base_conclusive_descriptor
+    )
+    article_flexible_conclusive_descriptor = (
+        r"(?:(?:significantly|clearly|definitely|much|far|overwhelmingly)\s+)?"
+        r"(?:a\s+|the\s+)?"
+        + base_conclusive_descriptor
+    )
+    explicit_marker = (
+        r"(?:final\s+answer|final|answer|my\s+answer|choice|"
+        r"chosen\s+(?:option|answer)|selected\s+(?:option|answer))"
+    )
+
+    full_lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in reversed(full_lines):
+        line_candidates = [line]
+        stripped_line = _strip_leading_numbered_prefix(line)
+        if stripped_line != line:
+            line_candidates.append(stripped_line)
+        for candidate in line_candidates:
+            if len(candidate) > 220 or _has_explicit_non_answer_cue(candidate):
+                continue
+            m = re.fullmatch(
+                rf"(?:{explicit_marker})?\s*[:\-]?\s*(?:is\s+)?"
+                r"(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?\.?",
+                candidate,
+                flags=re.IGNORECASE,
+            )
+            if not m:
+                continue
+            token = _normalize_label_token(m.group(1))
+            if token in valid:
+                return ChoiceParseResult(choice=token, strategy="short_answer_line")
+
+    for text_candidate in text_candidates:
+        answer_records = _valid_match_records(
+            rf"{explicit_marker}\s*[:\-]?\s*"
+            r"(?:is\s+)?(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?"
+            r"(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))",
+            text_candidate,
+            valid,
+        )
+        for token, match in reversed(answer_records):
+            if _is_rescue_safe_match(text_candidate, match) and not _has_later_conditional_override(text_candidate, match):
+                return ChoiceParseResult(choice=token, strategy="answer_marker")
+
+    for text_candidate in text_candidates:
+        decision_records = _valid_match_records(
+            r"\b(?:i|we)(?:'d|'ll)?\s+(?:(?:would|will|should|must|ought\s+to)\s+)?"
+            r"(?:choose|select|pick|chose|selected|choosing|picking|opt\s+for|go\s+with|"
+            r"prefer|recommend|suggest)\s+(?:option\s*)?[\(\[]?\s*(?:the\s+)?"
+            r"([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?"
+            r"(?=\s*(?:$|[\n\r\.\,\;\:\!\)]|\b(?:because|as|since|for)\b))",
+            text_candidate,
+            valid,
+        )
+        decision_records += _valid_match_records(
+            r"\bthe\s+artificial\s+agent\s+should\s+"
+            r"(?:choose|select|pick|opt\s+for|go\s+with)\s+"
+            r"(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?",
+            text_candidate,
+            valid,
+        )
+        for token, match in reversed(decision_records):
+            if _is_rescue_safe_match(text_candidate, match) and not _has_later_conditional_override(text_candidate, match):
+                return ChoiceParseResult(choice=token, strategy="decision_verb")
+
+    for text_candidate in text_candidates:
+        option_is_records = _valid_match_records(
+            r"\boption\s*[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\s+"
+            r"(?:\([^)\n]{1,160}\)\s+)?"
+            r"(?:is|seems(?:\s+to\s+be)?|seems\s+like|looks(?:\s+like)?|"
+            r"appears(?:\s+to\s+be)?|would\s+be)\s+(?:still\s+)?"
+            rf"{article_flexible_conclusive_descriptor}"
+            r"(?:\s+(?:choice|option|pick|one))?",
+            text_candidate,
+            valid,
+        )
+        option_is_records += _valid_match_records(
+            r"(?:^|[\s,;:])[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\s+"
+            r"(?:is|seems(?:\s+to\s+be)?|seems\s+like|looks(?:\s+like)?|"
+            r"appears(?:\s+to\s+be)?|would\s+be)\s+(?:still\s+)?"
+            rf"{article_flexible_conclusive_descriptor}"
+            r"(?:\s+(?:choice|option|pick|one))?",
+            text_candidate,
+            valid,
+        )
+        option_is_records += _valid_match_records(
+            r"\b(?:the\s+)?"
+            rf"{conclusive_descriptor}"
+            r"\s+(?:option|choice)(?:\s+is|\s+would\s+be|\s+seems\s+to\s+be)?\s+"
+            r"(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option|one)?\s*[\)\]]?",
+            text_candidate,
+            valid,
+        )
+        for token, match in reversed(option_is_records):
+            if _is_rescue_safe_match(text_candidate, match) and not _has_later_conditional_override(text_candidate, match):
+                return ChoiceParseResult(choice=token, strategy="option_is_best")
+
+    for text_candidate in text_candidates:
+        expected_value_records = _valid_match_records(
+            r"\boption\s*[\(\[]?\s*([a-z0-9ivx]+)\s*[\)\]]?\s+"
+            r"(?:has|had|offers?|offered)\s+(?:a\s+|an\s+|the\s+)?"
+            r"(?:significantly\s+higher|much\s+higher|higher|highest|greater|greatest|largest)\s+"
+            r"(?:expected\s+value|expected\s+utility|utility|ev|value)\b",
+            text_candidate,
+            valid,
+        )
+        expected_value_records += _valid_match_records(
+            r"\bthe\s+option\s+with\s+the\s+"
+            r"(?:significantly\s+higher|much\s+higher|higher|highest|greater|greatest|largest)\s+"
+            r"(?:expected\s+value|expected\s+utility|utility|ev|value)\s+is\s+"
+            r"(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option|one)?\s*[\)\]]?",
+            text_candidate,
+            valid,
+        )
+        for token, match in reversed(expected_value_records):
+            if _is_rescue_safe_match(text_candidate, match) and not _has_later_conditional_override(text_candidate, match):
+                return ChoiceParseResult(choice=token, strategy="expected_value_dominance")
+
+    best_choice_patterns = [
+        (
+            r"(?:therefore|thus|so|hence|overall|ultimately)?\s*,?\s*(?:the\s+)?"
+            r"(?:best|preferred|correct|right|optimal|clear(?:est)?|winner|"
+            r"(?:(?:significantly|clearly|definitely|much|far)\s+)?"
+            r"(?:more|most)\s+(?:attractive|appealing))\s+"
+            r"(?:option|choice|answer)(?:\s+for\b[^\n]{0,120}?)?\s*"
+            r"(?:is|would\s+be|seems\s+to\s+be|appears\s+to\s+be)\s*"
+            r"(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option|one)?\s*[\)\]]?",
+            "best_choice_is",
+        ),
+        (
+            r"(?:therefore|thus|so|hence|overall|ultimately)?\s*,?\s*"
+            r"(?:i|we)\s+(?:should|would|will|must|ought\s+to)\s+"
+            r"(?:choose|select|pick|go\s+with|opt\s+for)\s+"
+            r"(?:option\s*)?[\(\[]?\s*(?:the\s+)?([a-z0-9ivx]+)\s*(?:option)?\s*[\)\]]?",
+            "decision_modal",
+        ),
+    ]
+    full_sentences = _all_sentences(text)
+    for sentence_idx in range(len(full_sentences) - 1, -1, -1):
+        sentence = full_sentences[sentence_idx]
+        if _has_explicit_non_answer_cue(sentence):
+            continue
+        later_text = " ".join(full_sentences[sentence_idx + 1 : sentence_idx + 6])
+        for pattern, strategy in best_choice_patterns:
+            records = _valid_match_records(pattern, sentence, valid)
+            for token, match in reversed(records):
+                if _is_rescue_safe_match(sentence, match):
+                    if _later_text_has_conditional_override(later_text):
+                        continue
+                    return ChoiceParseResult(choice=token, strategy=strategy)
+
+    return ChoiceParseResult(choice=None, strategy=None)
 
 
 def extract_choice_with_strategy(

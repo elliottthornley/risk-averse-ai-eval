@@ -12,11 +12,11 @@ How this bundle was assembled:
 - The original full Gemma app was then stopped after medium plus partial high, and relaunched as a `high_stakes_test`-only resume so it would not duplicate the separate astronomical and steals runs.
 
 Finished metrics:
-- `medium_stakes_validation`: parse `98.5%`, cooperate `17.3%`, rebel `82.7%`, best CARA `25.9%`, best linear `80.2%`
-- `high_stakes_test`: parse `98.6%`, cooperate `11.7%`, rebel `88.3%`, best CARA `16.1%`, best linear `84.5%`
+- `medium_stakes_validation`: parse `99.5%`, cooperate `17.1%`, rebel `82.9%`, best CARA `25.6%`, best linear `80.4%`
+- `high_stakes_test`: parse `98.8%`, cooperate `11.6%`, rebel `88.4%`, best CARA `16.2%`, best linear `84.5%`
 - `astronomical_stakes_deployment`: parse `98.5%`, cooperate `6.5%`, rebel `93.5%`, best CARA `11.2%`, best linear `88.3%`
 - `steals_test`: parse `99.6%`, cooperate `78.7%`, steal `21.3%`, best CARA `72.4%`, best linear `91.3%`
 
 Interpretation:
 - This is a diagnostic visible-reasoning / no-system-prompt baseline, not the clean unchanged-prompt baseline protocol.
-- Even without a system prompt, Gemma stayed highly parse-compliant under the current parser.
+- Even without a system prompt, Gemma stayed highly parse-compliant. The 2026-04-24 parser refresh recovered a small number of additional explicit truncated answers on medium and high, but did not materially change the behavioral picture.

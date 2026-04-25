@@ -38,8 +38,9 @@ except ImportError:  # pragma: no cover - exercised only in non-ML envs
     PeftModel = None
 
 try:
-    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+    from transformers import AutoModel, AutoModelForSequenceClassification, AutoTokenizer
 except ImportError:  # pragma: no cover - exercised only in non-ML envs
+    AutoModel = None
     AutoModelForSequenceClassification = None
     AutoTokenizer = None
 
@@ -348,8 +349,98 @@ def extract_reward_scores(outputs: Any, reward_output_index: Optional[int]) -> t
     )
 
 
+class RftRewardModelWrapper(torch.nn.Module if torch is not None else object):
+    """AutoModel + LoRA + separate fp32 reward head, exposed to the eval loop.
+
+    Mirrors the forward path in rft_pipeline.py: right-padded inputs, last
+    non-pad hidden state, cast to the head's dtype (fp32), then a single
+    nn.Linear(hidden_size, 1, bias=True). Returns a dict with "logits" so
+    extract_reward_scores finds the scalar reward unchanged.
+    """
+
+    def __init__(self, backbone, reward_head, config):
+        super().__init__()
+        self.backbone = backbone
+        self.reward_head = reward_head
+        self.config = config
+
+    def forward(self, input_ids=None, attention_mask=None, **kwargs):
+        outputs = self.backbone(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            **kwargs,
+        )
+        hidden = getattr(outputs, "last_hidden_state", None)
+        if hidden is None:
+            hidden = outputs[0]
+        batch_size = hidden.shape[0]
+        if attention_mask is not None:
+            seq_lens = attention_mask.sum(dim=-1) - 1
+        else:
+            seq_lens = torch.full(
+                (batch_size,), hidden.shape[1] - 1, dtype=torch.long, device=hidden.device
+            )
+        last = hidden[torch.arange(batch_size, device=hidden.device), seq_lens]
+        last = last.to(self.reward_head.weight.dtype)
+        rewards = self.reward_head(last)
+        return {"logits": rewards}
+
+
+def build_reward_head_from_checkpoint(reward_head_path: str):
+    """Return an nn.Linear(hidden_size, 1) matching an rft_pipeline.py checkpoint.
+
+    The checkpoint format is `{"reward_head_state_dict": <state>, "hidden_size": int}`
+    (see rft_pipeline.py:470-473). Weights are kept in fp32 to match training.
+    """
+    if torch is None:
+        raise ImportError("torch is required to load a reward head checkpoint.")
+    if not os.path.exists(reward_head_path):
+        raise FileNotFoundError(f"reward_head checkpoint not found: {reward_head_path}")
+    ckpt = torch.load(reward_head_path, map_location="cpu")
+    if not isinstance(ckpt, dict) or "reward_head_state_dict" not in ckpt:
+        raise ValueError(
+            f"{reward_head_path} is not an rft_pipeline reward_head.pt "
+            "(expected key 'reward_head_state_dict')."
+        )
+    state = ckpt["reward_head_state_dict"]
+    if "weight" not in state:
+        raise ValueError(f"{reward_head_path} state dict missing 'weight' tensor.")
+    out_features, in_features = state["weight"].shape
+    has_bias = "bias" in state
+    head = torch.nn.Linear(in_features, out_features, bias=has_bias).to(torch.float32)
+    head.load_state_dict(state)
+    return head, int(ckpt.get("hidden_size", in_features))
+
+
+def resolve_reward_head_path(args) -> Optional[str]:
+    """Return the reward_head.pt path to load, or None if we should skip it.
+
+    Precedence: explicit --reward_head_path wins (empty string disables),
+    then auto-detect reward_head.pt inside --model_path.
+    """
+    explicit = getattr(args, "reward_head_path", None)
+    if explicit is not None:
+        if explicit == "":
+            return None
+        return resolve_path(explicit)
+    if args.model_path:
+        candidate = os.path.join(args.model_path, "reward_head.pt")
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
 def load_reward_model(args):
-    """Load tokenizer + reward model, optionally with a PEFT adapter."""
+    """Load tokenizer + reward model, optionally with a PEFT adapter.
+
+    Two loader paths:
+      1. rft_pipeline.py format (default when reward_head.pt is present next
+         to --model_path, or --reward_head_path is provided): AutoModel +
+         LoRA adapter + separate fp32 reward head. See RftRewardModelWrapper.
+      2. Standard HF reward model: AutoModelForSequenceClassification, with
+         the score head from the checkpoint. Optional PEFT adapter via
+         --model_path (the adapter target paths must match this wrapper).
+    """
     if torch is None or AutoModelForSequenceClassification is None or AutoTokenizer is None:
         raise ImportError(
             "Reward model evaluation requires torch, transformers, and peft to be installed "
@@ -371,6 +462,35 @@ def load_reward_model(args):
         elif tokenizer.unk_token is not None:
             tokenizer.pad_token = tokenizer.unk_token
     tokenizer.padding_side = "right"
+
+    reward_head_path = resolve_reward_head_path(args)
+    if reward_head_path is not None:
+        if AutoModel is None:
+            raise ImportError("transformers AutoModel is required to load rft_pipeline checkpoints.")
+        print(f"[load_reward_model] loading rft_pipeline checkpoint with reward_head={reward_head_path}")
+        backbone = AutoModel.from_pretrained(
+            load_source,
+            torch_dtype=parse_torch_dtype(args.torch_dtype),
+            device_map=args.device_map,
+            trust_remote_code=args.trust_remote_code,
+        )
+        if args.base_model and args.model_path:
+            if PeftModel is None:
+                raise ImportError("peft is required when using --model_path with a LoRA adapter.")
+            backbone = PeftModel.from_pretrained(backbone, args.model_path)
+        if getattr(backbone.config, "pad_token_id", None) is None and tokenizer.pad_token_id is not None:
+            backbone.config.pad_token_id = tokenizer.pad_token_id
+        reward_head, ckpt_hidden = build_reward_head_from_checkpoint(reward_head_path)
+        model_hidden = getattr(backbone.config, "hidden_size", None)
+        if model_hidden is not None and ckpt_hidden != model_hidden:
+            raise ValueError(
+                f"reward_head.pt hidden_size={ckpt_hidden} does not match "
+                f"backbone hidden_size={model_hidden}"
+            )
+        reward_head = reward_head.to(next(backbone.parameters()).device)
+        model = RftRewardModelWrapper(backbone, reward_head, backbone.config)
+        model.eval()
+        return model, tokenizer
 
     model = AutoModelForSequenceClassification.from_pretrained(
         load_source,
@@ -1038,6 +1158,18 @@ def main():
     )
     parser.add_argument("--trust_remote_code", action="store_true", help="Allow custom model/tokenizer code from the Hub")
     parser.add_argument("--no_fast_tokenizer", action="store_true", help="Disable fast tokenizer loading")
+    parser.add_argument(
+        "--reward_head_path",
+        type=str,
+        default=None,
+        help=(
+            "Path to reward_head.pt produced by rft_pipeline.py. Triggers the "
+            "AutoModel + LoRA + separate reward-head loader instead of "
+            "AutoModelForSequenceClassification. If omitted, auto-detects "
+            "reward_head.pt inside --model_path. Pass '' to force the default "
+            "sequence-classification loader even when one is present."
+        ),
+    )
 
     args = parser.parse_args()
 

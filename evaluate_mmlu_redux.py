@@ -556,10 +556,14 @@ def generate_transformers(
             with torch.no_grad():
                 output_ids = model.generate(**inputs, **generate_kwargs)
 
-            attention_mask = inputs["attention_mask"]
+            # `generate()` returns the full padded input plus newly generated
+            # tokens. For batched decoder-only models, slice from the shared
+            # padded input width, not from each row's non-pad token count.
+            # Otherwise left-padded batches can leak prompt text (including
+            # chat-template role markers) into the decoded "response".
+            padded_input_len = inputs["input_ids"].shape[1]
             for row_idx in range(output_ids.shape[0]):
-                prompt_len = int(attention_mask[row_idx].sum().item())
-                new_tokens = output_ids[row_idx, prompt_len:]
+                new_tokens = output_ids[row_idx, padded_input_len:]
                 response = tokenizer.decode(new_tokens, skip_special_tokens=True)
                 results.append(response)
     finally:
